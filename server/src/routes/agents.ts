@@ -33,7 +33,7 @@ import { assertBoard, assertCompanyAccess, getActorInfo } from "./authz.js";
 import { resolveDefaultAgentWorkspaceDir } from "../home-paths.js";
 import { findServerAdapter, listAdapterModels } from "../adapters/index.js";
 import { redactEventPayload } from "../redaction.js";
-import { runClaudeLogin } from "@paperclipai/adapter-claude-local/server";
+import { runClaudeLogin, runClaudeSlashCommand } from "@paperclipai/adapter-claude-local/server";
 import {
   DEFAULT_CODEX_LOCAL_BYPASS_APPROVALS_AND_SANDBOX,
   DEFAULT_CODEX_LOCAL_MODEL,
@@ -1184,6 +1184,44 @@ export function agentRoutes(db: Db) {
         adapterConfig: agent.adapterConfig,
       },
       config: runtimeConfig,
+    });
+
+    res.json(result);
+  });
+
+  router.post("/agents/:id/run-claude-slash-command", async (req, res) => {
+    assertBoard(req);
+    const id = req.params.id as string;
+    const agent = await svc.getById(id);
+    if (!agent) {
+      res.status(404).json({ error: "Agent not found" });
+      return;
+    }
+    assertCompanyAccess(req, agent.companyId);
+    if (agent.adapterType !== "claude_local") {
+      res.status(400).json({ error: "Slash commands are only supported for claude_local agents" });
+      return;
+    }
+
+    const { slashCommand } = req.body as { slashCommand?: unknown };
+    if (typeof slashCommand !== "string" || !slashCommand.trim().startsWith("/")) {
+      res.status(422).json({ error: "slashCommand must be a string starting with /" });
+      return;
+    }
+
+    const config = asRecord(agent.adapterConfig) ?? {};
+    const runtimeConfig = await secretsSvc.resolveAdapterConfigForRuntime(agent.companyId, config);
+    const result = await runClaudeSlashCommand({
+      runId: `claude-slash-${randomUUID()}`,
+      agent: {
+        id: agent.id,
+        companyId: agent.companyId,
+        name: agent.name,
+        adapterType: agent.adapterType,
+        adapterConfig: agent.adapterConfig,
+      },
+      config: runtimeConfig,
+      slashCommand: slashCommand.trim(),
     });
 
     res.json(result);

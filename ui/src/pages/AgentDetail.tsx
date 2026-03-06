@@ -1025,6 +1025,68 @@ function CostsSection({
   );
 }
 
+/* ---- Claude Slash Command Runner ---- */
+
+function ClaudeSlashCommandRunner({ agentId, companyId }: { agentId: string; companyId?: string }) {
+  const [command, setCommand] = useState("");
+  const [result, setResult] = useState<{ exitCode: number | null; stdout: string; stderr: string; timedOut: boolean } | null>(null);
+
+  const run = useMutation({
+    mutationFn: (cmd: string) => agentsApi.runClaudeSlashCommand(agentId, cmd, companyId),
+    onSuccess: (data) => setResult(data),
+  });
+
+  function handleRun() {
+    const cmd = command.trim();
+    if (!cmd) return;
+    setResult(null);
+    run.mutate(cmd);
+  }
+
+  return (
+    <div>
+      <h3 className="text-sm font-medium mb-3">Run Claude Slash Command</h3>
+      <div className="space-y-2">
+        <div className="flex gap-2">
+          <Input
+            className="font-mono text-xs"
+            placeholder="/plugin marketplace add obra/superpowers-marketplace"
+            value={command}
+            onChange={(e) => setCommand(e.target.value)}
+            onKeyDown={(e) => { if (e.key === "Enter") handleRun(); }}
+            disabled={run.isPending}
+          />
+          <Button
+            size="sm"
+            onClick={handleRun}
+            disabled={run.isPending || !command.trim().startsWith("/")}
+          >
+            {run.isPending ? "Running…" : "Run"}
+          </Button>
+        </div>
+        {run.isError && (
+          <p className="text-xs text-destructive">
+            {run.error instanceof Error ? run.error.message : "Command failed"}
+          </p>
+        )}
+        {result && (
+          <div className="border border-border rounded-md p-3 space-y-1">
+            <p className="text-xs text-muted-foreground">
+              Exit code: {result.exitCode ?? "—"}{result.timedOut ? " (timed out)" : ""}
+            </p>
+            {result.stdout && (
+              <pre className="text-xs font-mono whitespace-pre-wrap break-all max-h-48 overflow-y-auto">{result.stdout}</pre>
+            )}
+            {result.stderr && (
+              <pre className="text-xs font-mono whitespace-pre-wrap break-all max-h-24 overflow-y-auto text-muted-foreground">{result.stderr}</pre>
+            )}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 /* ---- MCP Config Editor ---- */
 
 function McpConfigEditor({ agentId, companyId }: { agentId: string; companyId?: string }) {
@@ -1186,6 +1248,10 @@ function AgentConfigurePage({
       </div>
 
       <McpConfigEditor agentId={agent.id} companyId={companyId} />
+
+      {agent.adapterType === "claude_local" && (
+        <ClaudeSlashCommandRunner agentId={agent.id} companyId={companyId} />
+      )}
 
       {/* Configuration Revisions — collapsible at the bottom */}
       <div>

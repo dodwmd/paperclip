@@ -265,6 +265,43 @@ export async function runClaudeLogin(input: {
   });
 }
 
+export async function runClaudeSlashCommand(input: {
+  runId: string;
+  agent: { id: string; companyId: string; name: string; adapterType: string; adapterConfig: unknown };
+  config: Record<string, unknown>;
+  slashCommand: string;
+  onLog?: (stream: "stdout" | "stderr", chunk: string) => Promise<void>;
+}) {
+  const onLog = input.onLog ?? (async () => {});
+  const runtime = await buildClaudeRuntimeConfig({
+    runId: input.runId,
+    agent: input.agent,
+    config: input.config,
+    context: {},
+  });
+
+  const proc = await runChildProcess(
+    input.runId,
+    runtime.command,
+    ["--print", "-", "--output-format", "stream-json", "--verbose"],
+    {
+      cwd: runtime.cwd,
+      env: runtime.env,
+      stdin: input.slashCommand,
+      timeoutSec: runtime.timeoutSec > 0 ? runtime.timeoutSec : 60,
+      graceSec: runtime.graceSec,
+      onLog,
+    },
+  );
+
+  return {
+    exitCode: proc.exitCode,
+    stdout: proc.stdout,
+    stderr: proc.stderr,
+    timedOut: proc.timedOut ?? false,
+  };
+}
+
 export async function execute(ctx: AdapterExecutionContext): Promise<AdapterExecutionResult> {
   const { runId, agent, runtime, config, context, onLog, onMeta, authToken } = ctx;
 
