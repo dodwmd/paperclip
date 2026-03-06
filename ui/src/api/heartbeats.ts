@@ -38,6 +38,7 @@ export const heartbeatsApi = {
       `/heartbeat-runs/${runId}/log?offset=${encodeURIComponent(String(offset))}&limitBytes=${encodeURIComponent(String(limitBytes))}`,
     ),
   cancel: (runId: string) => api.post<void>(`/heartbeat-runs/${runId}/cancel`, {}),
+  acknowledge: (runId: string) => api.post<void>(`/heartbeat-runs/${runId}/acknowledge`, {}),
   liveRunsForIssue: (issueId: string) =>
     api.get<LiveRunForIssue[]>(`/issues/${issueId}/live-runs`),
   activeRunForIssue: (issueId: string) =>

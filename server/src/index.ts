@@ -491,8 +491,9 @@ void (async () => {
 
         const { agentsMdPath, anyCopied } = await migrateInstructionFilesToAgentHome(row.id, existingPath);
 
-        // Update instructionsFilePath in DB if it has changed
-        const needsUpdate = existingPath !== agentsMdPath;
+        // Only update if files were copied, or if there was already a path that needs relocating.
+        // Never set instructionsFilePath for agents that had none (null) — they use no system prompt file.
+        const needsUpdate = existingPath !== null && existingPath !== agentsMdPath;
         if (anyCopied || needsUpdate) {
           await (db as any)
             .update(agentsTable)

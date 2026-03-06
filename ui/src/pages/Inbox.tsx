@@ -36,6 +36,7 @@ import {
   XCircle,
   UserCheck,
   RotateCcw,
+  X,
 } from "lucide-react";
 import { Identity } from "../components/Identity";
 import { PageTabBar } from "../components/PageTabBar";
@@ -93,7 +94,9 @@ function getLatestFailedRunsByAgent(runs: HeartbeatRun[]): HeartbeatRun[] {
     }
   }
 
-  return Array.from(latestByAgent.values()).filter((run) => FAILED_RUN_STATUSES.has(run.status));
+  return Array.from(latestByAgent.values()).filter(
+    (run) => FAILED_RUN_STATUSES.has(run.status) && !run.acknowledgedAt,
+  );
 }
 
 function firstNonEmptyLine(value: string | null | undefined): string | null {
@@ -162,6 +165,14 @@ function FailedRunCard({
     },
   });
 
+  const dismissRun = useMutation({
+    mutationFn: () => heartbeatsApi.acknowledge(run.id),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.heartbeats(run.companyId) });
+      queryClient.invalidateQueries({ queryKey: queryKeys.heartbeats(run.companyId, run.agentId) });
+    },
+  });
+
   return (
     <div className="group relative overflow-hidden rounded-xl border border-red-500/30 bg-gradient-to-br from-red-500/10 via-card to-card p-4">
       <div className="absolute right-0 top-0 h-24 w-24 rounded-full bg-red-500/10 blur-2xl" />
@@ -206,7 +217,7 @@ function FailedRunCard({
               size="sm"
               className="h-8 px-2.5"
               onClick={() => retryRun.mutate()}
-              disabled={retryRun.isPending}
+              disabled={retryRun.isPending || dismissRun.isPending}
             >
               <RotateCcw className="mr-1.5 h-3.5 w-3.5" />
               {retryRun.isPending ? "Retrying…" : "Retry"}
@@ -222,6 +233,17 @@ function FailedRunCard({
                 Open run
                 <ArrowUpRight className="ml-1.5 h-3.5 w-3.5" />
               </Link>
+            </Button>
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              className="h-8 px-2.5 text-muted-foreground hover:text-foreground"
+              onClick={() => dismissRun.mutate()}
+              disabled={dismissRun.isPending || retryRun.isPending}
+              title="Dismiss"
+            >
+              <X className="h-3.5 w-3.5" />
             </Button>
           </div>
         </div>
