@@ -28,6 +28,23 @@ Before making changes, read in this order:
 - `packages/shared/`: shared types, constants, validators, API path constants
 - `doc/`: operational and product docs
 
+## 4. Database Access (Production)
+
+On the production server (`zoe`), PostgreSQL uses a real password set via an agenix secret.
+**Never use `PGPASSWORD=paperclip` or `-h localhost`** — those use the embedded dev defaults and will fail with auth errors.
+
+Connect via Unix socket (peer auth ident map — no password required):
+
+```sh
+psql -U paperclip paperclip
+```
+
+Or use the `DATABASE_URL` environment variable (available in the Paperclip service environment and inherited by agents):
+
+```sh
+psql "$DATABASE_URL"
+```
+
 ## 4. Dev Setup (Auto DB)
 
 Use embedded PGlite in dev by leaving `DATABASE_URL` unset.
