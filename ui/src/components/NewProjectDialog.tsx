@@ -24,7 +24,6 @@ import {
   Plus,
   X,
   FolderOpen,
-  Github,
   GitBranch,
 } from "lucide-react";
 import { PROJECT_COLORS } from "@paperclipai/shared";
@@ -96,11 +95,9 @@ export function NewProjectDialog() {
 
   const isAbsolutePath = (value: string) => value.startsWith("/") || /^[A-Za-z]:[\\/]/.test(value);
 
-  const isGitHubRepoUrl = (value: string) => {
+  const isGitRepoUrl = (value: string) => {
     try {
       const parsed = new URL(value);
-      const host = parsed.hostname.toLowerCase();
-      if (host !== "github.com" && host !== "www.github.com") return false;
       const segments = parsed.pathname.split("/").filter(Boolean);
       return segments.length >= 2;
     } catch {
@@ -119,9 +116,9 @@ export function NewProjectDialog() {
       const parsed = new URL(value);
       const segments = parsed.pathname.split("/").filter(Boolean);
       const repo = segments[segments.length - 1]?.replace(/\.git$/i, "") ?? "";
-      return repo || "GitHub repo";
+      return repo || "Git repo";
     } catch {
-      return "GitHub repo";
+      return "Git repo";
     }
   };
 
@@ -141,8 +138,8 @@ export function NewProjectDialog() {
       setWorkspaceError("Local folder must be a full absolute path.");
       return;
     }
-    if (repoRequired && !isGitHubRepoUrl(repoUrl)) {
-      setWorkspaceError("Repo workspace must use a valid GitHub repo URL.");
+    if (repoRequired && !isGitRepoUrl(repoUrl)) {
+      setWorkspaceError("Repo workspace must use a valid git repo URL (e.g. https://github.com/org/repo or https://gitlab.com/org/repo).");
       return;
     }
 
@@ -284,7 +281,7 @@ export function NewProjectDialog() {
         <div className="px-4 pb-3 space-y-3 border-t border-border">
           <div className="pt-3">
             <p className="text-sm font-medium">Where will work be done on this project?</p>
-            <p className="text-xs text-muted-foreground">Add local folder and/or GitHub repo workspace hints.</p>
+            <p className="text-xs text-muted-foreground">Add local folder and/or git repo workspace hints.</p>
           </div>
           <div className="grid gap-2 sm:grid-cols-3">
             <button
@@ -310,10 +307,10 @@ export function NewProjectDialog() {
               onClick={() => toggleWorkspaceSetup("repo")}
             >
               <div className="flex items-center gap-2 text-sm font-medium">
-                <Github className="h-4 w-4" />
-                A github repo
+                <GitBranch className="h-4 w-4" />
+                A git repo
               </div>
-              <p className="mt-1 text-xs text-muted-foreground">Paste a GitHub URL.</p>
+              <p className="mt-1 text-xs text-muted-foreground">Paste a GitHub or GitLab URL.</p>
             </button>
             <button
               type="button"
@@ -347,12 +344,12 @@ export function NewProjectDialog() {
           )}
           {(workspaceSetup === "repo" || workspaceSetup === "both") && (
             <div className="rounded-md border border-border p-2">
-              <label className="mb-1 block text-xs text-muted-foreground">GitHub repo URL</label>
+              <label className="mb-1 block text-xs text-muted-foreground">Git repo URL</label>
               <input
                 className="w-full rounded border border-border bg-transparent px-2 py-1 text-xs outline-none"
                 value={workspaceRepoUrl}
                 onChange={(e) => setWorkspaceRepoUrl(e.target.value)}
-                placeholder="https://github.com/org/repo"
+                placeholder="https://github.com/org/repo or https://gitlab.com/org/repo"
               />
             </div>
           )}

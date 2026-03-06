@@ -12,7 +12,7 @@ import { Separator } from "@/components/ui/separator";
 import { Button } from "@/components/ui/button";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
-import { ExternalLink, Github, Plus, Trash2, X } from "lucide-react";
+import { ExternalLink, Github, GitBranch, Plus, Trash2, X } from "lucide-react";
 import { ChoosePathButton } from "./PathInstructionsModal";
 
 interface ProjectPropertiesProps {
@@ -103,11 +103,9 @@ export function ProjectProperties({ project, onUpdate }: ProjectPropertiesProps)
 
   const isAbsolutePath = (value: string) => value.startsWith("/") || /^[A-Za-z]:[\\/]/.test(value);
 
-  const isGitHubRepoUrl = (value: string) => {
+  const isGitRepoUrl = (value: string) => {
     try {
       const parsed = new URL(value);
-      const host = parsed.hostname.toLowerCase();
-      if (host !== "github.com" && host !== "www.github.com") return false;
       const segments = parsed.pathname.split("/").filter(Boolean);
       return segments.length >= 2;
     } catch {
@@ -126,13 +124,13 @@ export function ProjectProperties({ project, onUpdate }: ProjectPropertiesProps)
       const parsed = new URL(value);
       const segments = parsed.pathname.split("/").filter(Boolean);
       const repo = segments[segments.length - 1]?.replace(/\.git$/i, "") ?? "";
-      return repo || "GitHub repo";
+      return repo || "Git repo";
     } catch {
-      return "GitHub repo";
+      return "Git repo";
     }
   };
 
-  const formatGitHubRepo = (value: string) => {
+  const formatGitRepo = (value: string) => {
     try {
       const parsed = new URL(value);
       const segments = parsed.pathname.split("/").filter(Boolean);
@@ -161,8 +159,8 @@ export function ProjectProperties({ project, onUpdate }: ProjectPropertiesProps)
 
   const submitRepoWorkspace = () => {
     const repoUrl = workspaceRepoUrl.trim();
-    if (!isGitHubRepoUrl(repoUrl)) {
-      setWorkspaceError("Repo workspace must use a valid GitHub repo URL.");
+    if (!isGitRepoUrl(repoUrl)) {
+      setWorkspaceError("Repo workspace must use a valid git repo URL (e.g. https://github.com/org/repo or https://gitlab.com/org/repo).");
       return;
     }
     setWorkspaceError(null);
@@ -194,7 +192,7 @@ export function ProjectProperties({ project, onUpdate }: ProjectPropertiesProps)
     const hasLocalFolder = Boolean(workspace.cwd && workspace.cwd !== REPO_ONLY_CWD_SENTINEL);
     const confirmed = window.confirm(
       hasLocalFolder
-        ? "Clear GitHub repo from this workspace?"
+        ? "Clear git repo from this workspace?"
         : "Delete this workspace repo?",
     );
     if (!confirmed) return;
@@ -341,8 +339,10 @@ export function ProjectProperties({ project, onUpdate }: ProjectPropertiesProps)
                         rel="noreferrer"
                         className="inline-flex min-w-0 items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground hover:underline"
                       >
-                        <Github className="h-3 w-3 shrink-0" />
-                        <span className="truncate">{formatGitHubRepo(workspace.repoUrl)}</span>
+                        {workspace.repoUrl.includes("github.com")
+                          ? <Github className="h-3 w-3 shrink-0" />
+                          : <GitBranch className="h-3 w-3 shrink-0" />}
+                        <span className="truncate">{formatGitRepo(workspace.repoUrl)}</span>
                         <ExternalLink className="h-3 w-3 shrink-0" />
                       </a>
                       <Button
@@ -425,7 +425,7 @@ export function ProjectProperties({ project, onUpdate }: ProjectPropertiesProps)
                 className="w-full rounded border border-border bg-transparent px-2 py-1 text-xs outline-none"
                 value={workspaceRepoUrl}
                 onChange={(e) => setWorkspaceRepoUrl(e.target.value)}
-                placeholder="https://github.com/org/repo"
+                placeholder="https://github.com/org/repo or https://gitlab.com/org/repo"
               />
               <div className="flex items-center gap-2">
                 <Button
