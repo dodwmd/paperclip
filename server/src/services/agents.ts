@@ -15,6 +15,7 @@ import { isUuidLike, normalizeAgentUrlKey } from "@paperclipai/shared";
 import { conflict, notFound, unprocessable } from "../errors.js";
 import { normalizeAgentPermissions } from "./agent-permissions.js";
 import { REDACTED_EVENT_VALUE, sanitizeRecord } from "../redaction.js";
+import { ensureAgentHomeDir } from "../agent-home.js";
 
 function hashToken(token: string) {
   return createHash("sha256").update(token).digest("hex");
@@ -274,6 +275,9 @@ export function agentService(db: Db) {
         .values({ ...data, companyId, role, permissions: normalizedPermissions })
         .returning()
         .then((rows) => rows[0]);
+
+      // Set up the agent's private home directory (best-effort — don't fail creation)
+      await ensureAgentHomeDir(created.id).catch(() => {});
 
       return normalizeAgentRow(created);
     },

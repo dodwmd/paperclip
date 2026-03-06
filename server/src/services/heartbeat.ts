@@ -22,7 +22,8 @@ import type { AdapterExecutionResult, AdapterInvocationMeta, AdapterSessionCodec
 import { createLocalAgentJwt } from "../agent-auth-jwt.js";
 import { parseObject, asBoolean, asNumber, appendWithCap, MAX_EXCERPT_BYTES } from "../adapters/utils.js";
 import { secretService } from "./secrets.js";
-import { resolveDefaultAgentWorkspaceDir } from "../home-paths.js";
+import { resolveDefaultAgentWorkspaceDir, resolveDefaultAgentHomeDir } from "../home-paths.js";
+import { ensureAgentHomeDir } from "../agent-home.js";
 
 const MAX_LIVE_LOG_CHUNK_BYTES = 8 * 1024;
 const HEARTBEAT_MAX_CONCURRENT_RUNS_DEFAULT = 1;
@@ -1269,11 +1270,18 @@ export function heartbeatService(db: Db) {
           "local agent jwt secret missing or invalid; running without injected PAPERCLIP_API_KEY",
         );
       }
+      const agentHomeDir = await ensureAgentHomeDir(agent.id).catch(
+        () => resolveDefaultAgentHomeDir(agent.id),
+      );
+      const resolvedConfigWithHome = {
+        ...resolvedConfig,
+        env: { HOME: agentHomeDir, ...((resolvedConfig.env as Record<string, unknown>) ?? {}) },
+      };
       const adapterResult = await adapter.execute({
         runId: run.id,
         agent,
         runtime: runtimeForAdapter,
-        config: resolvedConfig,
+        config: resolvedConfigWithHome,
         context,
         onLog,
         onMeta: onAdapterMeta,

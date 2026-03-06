@@ -61,6 +61,18 @@ export function resolveDefaultAgentWorkspaceDir(agentId: string): string {
   return path.resolve(resolvePaperclipInstanceRoot(), "workspaces", trimmed);
 }
 
+export function resolveDefaultAgentHomeDir(agentId: string): string {
+  const trimmed = agentId.trim();
+  if (!PATH_SEGMENT_RE.test(trimmed)) {
+    throw new Error(`Invalid agent id for home path '${agentId}'.`);
+  }
+  return path.resolve(resolvePaperclipInstanceRoot(), "agent-homes", trimmed);
+}
+
+export function resolveDefaultAgentHomeTemplateDir(): string {
+  return path.resolve(resolvePaperclipInstanceRoot(), "agent-home-template");
+}
+
 export function resolveHomeAwarePath(value: string): string {
   return path.resolve(expandHomePrefix(value));
 }

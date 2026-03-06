@@ -30,7 +30,8 @@ import {
 } from "../services/index.js";
 import { conflict, forbidden, unprocessable } from "../errors.js";
 import { assertBoard, assertCompanyAccess, getActorInfo } from "./authz.js";
-import { resolveDefaultAgentWorkspaceDir } from "../home-paths.js";
+import { resolveDefaultAgentWorkspaceDir, resolveDefaultAgentHomeDir } from "../home-paths.js";
+import { ensureAgentHomeDir } from "../agent-home.js";
 import { findServerAdapter, listAdapterModels } from "../adapters/index.js";
 import { redactEventPayload } from "../redaction.js";
 import { runClaudeLogin, runClaudeSlashCommand } from "@paperclipai/adapter-claude-local/server";
@@ -1174,6 +1175,11 @@ export function agentRoutes(db: Db) {
 
     const config = asRecord(agent.adapterConfig) ?? {};
     const runtimeConfig = await secretsSvc.resolveAdapterConfigForRuntime(agent.companyId, config);
+    const agentHomeDir = await ensureAgentHomeDir(agent.id).catch(() => resolveDefaultAgentHomeDir(agent.id));
+    const runtimeConfigWithHome = {
+      ...runtimeConfig,
+      env: { HOME: agentHomeDir, ...((runtimeConfig.env as Record<string, unknown>) ?? {}) },
+    };
     const result = await runClaudeLogin({
       runId: `claude-login-${randomUUID()}`,
       agent: {
@@ -1183,7 +1189,7 @@ export function agentRoutes(db: Db) {
         adapterType: agent.adapterType,
         adapterConfig: agent.adapterConfig,
       },
-      config: runtimeConfig,
+      config: runtimeConfigWithHome,
     });
 
     res.json(result);
@@ -1211,6 +1217,11 @@ export function agentRoutes(db: Db) {
 
     const config = asRecord(agent.adapterConfig) ?? {};
     const runtimeConfig = await secretsSvc.resolveAdapterConfigForRuntime(agent.companyId, config);
+    const agentHomeDirForSlash = await ensureAgentHomeDir(agent.id).catch(() => resolveDefaultAgentHomeDir(agent.id));
+    const runtimeConfigWithHomeForSlash = {
+      ...runtimeConfig,
+      env: { HOME: agentHomeDirForSlash, ...((runtimeConfig.env as Record<string, unknown>) ?? {}) },
+    };
     const result = await runClaudeSlashCommand({
       runId: `claude-slash-${randomUUID()}`,
       agent: {
@@ -1220,7 +1231,7 @@ export function agentRoutes(db: Db) {
         adapterType: agent.adapterType,
         adapterConfig: agent.adapterConfig,
       },
-      config: runtimeConfig,
+      config: runtimeConfigWithHomeForSlash,
       slashCommand: slashCommand.trim(),
     });
 

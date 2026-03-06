@@ -15,6 +15,7 @@ import {
   formatDatabaseBackupResult,
   runDatabaseBackup,
   authUsers,
+  agents as agentsTable,
   companies,
   companyMemberships,
   instanceUserRoles,
@@ -25,6 +26,7 @@ import { loadConfig } from "./config.js";
 import { logger } from "./middleware/logger.js";
 import { setupLiveEventsWebSocketServer } from "./realtime/live-events-ws.js";
 import { heartbeatService } from "./services/index.js";
+import { ensureAgentHomeDirsForAll } from "./agent-home.js";
 import { createStorageServiceFromConfig } from "./storage/index.js";
 import { printStartupBanner } from "./startup-banner.js";
 import { getBoardClaimWarningUrl, initializeBoardClaimChallenge } from "./board-claim.js";
@@ -466,6 +468,20 @@ setupLiveEventsWebSocketServer(server, db as any, {
   deploymentMode: config.deploymentMode,
   resolveSessionFromHeaders,
 });
+
+// Bootstrap per-agent home directories for all existing agents
+void (db as any)
+  .select({ id: agentsTable.id })
+  .from(agentsTable)
+  .then((rows: { id: string }[]) => ensureAgentHomeDirsForAll(rows.map((r) => r.id)))
+  .then((failures: { agentId: string; error: unknown }[]) => {
+    if (failures.length > 0) {
+      logger.warn({ failures }, "some agent home dirs could not be created at startup");
+    }
+  })
+  .catch((err: unknown) => {
+    logger.error({ err }, "startup agent home dir bootstrap failed");
+  });
 
 if (config.heartbeatSchedulerEnabled) {
   const heartbeat = heartbeatService(db as any);
