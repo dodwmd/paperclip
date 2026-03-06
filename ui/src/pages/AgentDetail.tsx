@@ -1027,6 +1027,73 @@ function CostsSection({
 
 /* ---- Claude Slash Command Runner ---- */
 
+type ParsedLine =
+  | { kind: "text"; text: string }
+  | { kind: "error"; text: string }
+  | { kind: "cost"; costUsd: number; inputTokens: number; outputTokens: number }
+  | { kind: "skip" };
+
+function parseClaudeOutputLine(raw: string): ParsedLine {
+  const trimmed = raw.trim();
+  if (!trimmed) return { kind: "skip" };
+
+  let parsed: Record<string, unknown> | null = null;
+  try {
+    const v = JSON.parse(trimmed);
+    if (typeof v === "object" && v !== null && !Array.isArray(v)) parsed = v as Record<string, unknown>;
+  } catch { /* not json */ }
+
+  if (!parsed) return { kind: "text", text: trimmed };
+
+  const type = typeof parsed.type === "string" ? parsed.type : "";
+
+  if (type === "system") return { kind: "skip" };
+  if (type === "rate_limit_event") return { kind: "skip" };
+
+  if (type === "assistant") {
+    const msg = parsed.message as Record<string, unknown> | null ?? {};
+    const content = Array.isArray(msg.content) ? msg.content : [];
+    const texts: string[] = [];
+    for (const block of content) {
+      const b = block as Record<string, unknown>;
+      if (b.type === "text" && typeof b.text === "string" && b.text.trim()) {
+        texts.push(b.text.trim());
+      }
+    }
+    return texts.length > 0 ? { kind: "text", text: texts.join("\n") } : { kind: "skip" };
+  }
+
+  if (type === "result") {
+    const pieces: string[] = [];
+    if (typeof parsed.result === "string" && parsed.result.trim()) pieces.push(parsed.result.trim());
+    if (parsed.is_error === true) {
+      const errors = Array.isArray(parsed.errors)
+        ? (parsed.errors as unknown[]).map((e) => (typeof e === "string" ? e : JSON.stringify(e))).join("; ")
+        : "";
+      return { kind: "error", text: errors || pieces[0] || "Command failed" };
+    }
+    const usage = parsed.usage as Record<string, unknown> ?? {};
+    const costUsd = typeof parsed.total_cost_usd === "number" ? parsed.total_cost_usd : 0;
+    const inputTokens = typeof usage.input_tokens === "number" ? usage.input_tokens : 0;
+    const outputTokens = typeof usage.output_tokens === "number" ? usage.output_tokens : 0;
+    return {
+      kind: "cost",
+      costUsd,
+      inputTokens,
+      outputTokens,
+    };
+  }
+
+  return { kind: "skip" };
+}
+
+function formatClaudeOutput(stdout: string): { lines: ParsedLine[]; hasJson: boolean } {
+  const raw = stdout.split("\n");
+  const hasJson = raw.some((l) => l.trim().startsWith("{"));
+  const lines = raw.map(parseClaudeOutputLine);
+  return { lines, hasJson };
+}
+
 function ClaudeSlashCommandRunner({ agentId, companyId }: { agentId: string; companyId?: string }) {
   const [command, setCommand] = useState("");
   const [result, setResult] = useState<{ exitCode: number | null; stdout: string; stderr: string; timedOut: boolean } | null>(null);
@@ -1043,9 +1110,15 @@ function ClaudeSlashCommandRunner({ agentId, companyId }: { agentId: string; com
     run.mutate(cmd);
   }
 
+  const parsed = result ? formatClaudeOutput(result.stdout) : null;
+  const visibleLines = parsed?.lines.filter((l) => l.kind !== "skip") ?? [];
+  const costLine = visibleLines.find((l) => l.kind === "cost") as Extract<ParsedLine, { kind: "cost" }> | undefined;
+  const textLines = visibleLines.filter((l) => l.kind === "text" || l.kind === "error");
+  const failed = result && (result.exitCode !== 0 || result.timedOut);
+
   return (
     <div>
-      <h3 className="text-sm font-medium mb-3">Run Claude Slash Command</h3>
+      <h3 className="text-sm font-medium mb-3">Run Claude Command</h3>
       <div className="space-y-2">
         <div className="flex gap-2">
           <Input
@@ -1070,15 +1143,51 @@ function ClaudeSlashCommandRunner({ agentId, companyId }: { agentId: string; com
           </p>
         )}
         {result && (
-          <div className="border border-border rounded-md p-3 space-y-1">
-            <p className="text-xs text-muted-foreground">
-              Exit code: {result.exitCode ?? "—"}{result.timedOut ? " (timed out)" : ""}
-            </p>
-            {result.stdout && (
-              <pre className="text-xs font-mono whitespace-pre-wrap break-all max-h-48 overflow-y-auto">{result.stdout}</pre>
+          <div className={cn("border rounded-md p-3 space-y-2", failed ? "border-destructive/50" : "border-border")}>
+            {/* Status line */}
+            <div className="flex items-center gap-2 text-xs text-muted-foreground">
+              {result.timedOut ? (
+                <span className="text-destructive">Timed out</span>
+              ) : result.exitCode === 0 ? (
+                <span className="text-green-600 dark:text-green-400">Success</span>
+              ) : (
+                <span className="text-destructive">Exit {result.exitCode}</span>
+              )}
+              {costLine && (
+                <>
+                  <span>·</span>
+                  <span>${costLine.costUsd.toFixed(4)}</span>
+                  <span>·</span>
+                  <span>{(costLine.inputTokens + costLine.outputTokens).toLocaleString()} tokens</span>
+                </>
+              )}
+            </div>
+
+            {/* Text output */}
+            {textLines.length > 0 && (
+              <div className="space-y-1">
+                {textLines.map((line, i) => (
+                  <p
+                    key={i}
+                    className={cn(
+                      "text-xs whitespace-pre-wrap break-words",
+                      line.kind === "error" ? "text-destructive" : "",
+                    )}
+                  >
+                    {(line as Extract<ParsedLine, { kind: "text" | "error" }>).text}
+                  </p>
+                ))}
+              </div>
             )}
-            {result.stderr && (
-              <pre className="text-xs font-mono whitespace-pre-wrap break-all max-h-24 overflow-y-auto text-muted-foreground">{result.stderr}</pre>
+
+            {/* Raw stdout fallback (non-json output) */}
+            {!parsed?.hasJson && result.stdout.trim() && (
+              <pre className="text-xs font-mono whitespace-pre-wrap break-all max-h-48 overflow-y-auto">{result.stdout.trim()}</pre>
+            )}
+
+            {/* Stderr */}
+            {result.stderr.trim() && (
+              <pre className="text-xs font-mono whitespace-pre-wrap break-all max-h-24 overflow-y-auto text-muted-foreground border-t border-border pt-2">{result.stderr.trim()}</pre>
             )}
           </div>
         )}

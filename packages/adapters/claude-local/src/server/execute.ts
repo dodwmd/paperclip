@@ -280,15 +280,20 @@ export async function runClaudeSlashCommand(input: {
     context: {},
   });
 
+  // Slash commands must be passed as CLI args (not via stdin), otherwise
+  // claude treats them as regular prompts forwarded to the model.
+  // e.g. "/plugin marketplace add foo" → ["plugin", "marketplace", "add", "foo"]
+  // Claude Code accepts the leading slash as the subcommand form or without it.
+  const commandParts = input.slashCommand.trim().replace(/^\//, "").split(/\s+/);
+
   const proc = await runChildProcess(
     input.runId,
     runtime.command,
-    ["--print", "-", "--output-format", "stream-json", "--verbose"],
+    commandParts,
     {
       cwd: runtime.cwd,
       env: runtime.env,
-      stdin: input.slashCommand,
-      timeoutSec: runtime.timeoutSec > 0 ? runtime.timeoutSec : 60,
+      timeoutSec: runtime.timeoutSec > 0 ? runtime.timeoutSec : 120,
       graceSec: runtime.graceSec,
       onLog,
     },
