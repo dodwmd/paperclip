@@ -141,4 +141,8 @@ export const agentsApi = {
   ) => api.post<HeartbeatRun | { status: "skipped" }>(agentPath(id, companyId, "/wakeup"), data),
   loginWithClaude: (id: string, companyId?: string) =>
     api.post<ClaudeLoginResult>(agentPath(id, companyId, "/claude-login"), {}),
+  getMcpConfig: (id: string, companyId?: string) =>
+    api.get<{ content: string | null }>(agentPath(id, companyId, "/mcp-config")),
+  updateMcpConfig: (id: string, content: string, companyId?: string) =>
+    api.put<{ ok: true; path: string }>(agentPath(id, companyId, "/mcp-config"), { content }),
 };

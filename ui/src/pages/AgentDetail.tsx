@@ -54,6 +54,7 @@ import {
   Settings,
 } from "lucide-react";
 import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
 import { AgentIcon, AgentIconPicker } from "../components/AgentIconPicker";
 import { isUuidLike, type Agent, type HeartbeatRun, type HeartbeatRunEvent, type AgentRuntimeState } from "@paperclipai/shared";
 import { agentRouteRef } from "../lib/utils";
@@ -1024,6 +1025,112 @@ function CostsSection({
   );
 }
 
+/* ---- MCP Config Editor ---- */
+
+function McpConfigEditor({ agentId, companyId }: { agentId: string; companyId?: string }) {
+  const queryClient = useQueryClient();
+  const [draft, setDraft] = useState<string | null>(null);
+  const [jsonError, setJsonError] = useState<string | null>(null);
+
+  const { data, isLoading } = useQuery({
+    queryKey: queryKeys.agents.mcpConfig(agentId),
+    queryFn: () => agentsApi.getMcpConfig(agentId, companyId),
+  });
+
+  const currentContent = data?.content ?? "";
+  const displayValue = draft ?? currentContent;
+
+  useEffect(() => {
+    setDraft(null);
+    setJsonError(null);
+  }, [agentId]);
+
+  const saveMcp = useMutation({
+    mutationFn: (content: string) => agentsApi.updateMcpConfig(agentId, content, companyId),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.agents.mcpConfig(agentId) });
+      setDraft(null);
+      setJsonError(null);
+    },
+  });
+
+  function handleChange(value: string) {
+    setDraft(value);
+    if (value.trim() === "") {
+      setJsonError(null);
+      return;
+    }
+    try {
+      JSON.parse(value);
+      setJsonError(null);
+    } catch (e: unknown) {
+      setJsonError(e instanceof Error ? e.message : "Invalid JSON");
+    }
+  }
+
+  function handleSave() {
+    const content = (draft ?? currentContent).trim();
+    if (jsonError) return;
+    saveMcp.mutate(content === "" ? "{}" : content);
+  }
+
+  function handleCancel() {
+    setDraft(null);
+    setJsonError(null);
+  }
+
+  const isDirty = draft !== null && draft !== currentContent;
+
+  return (
+    <div>
+      <div className="flex items-center justify-between mb-3">
+        <h3 className="text-sm font-medium">MCP Configuration</h3>
+        {isDirty && (
+          <div className="flex items-center gap-2">
+            <Button
+              size="sm"
+              variant="outline"
+              className="h-7 px-2.5 text-xs"
+              onClick={handleCancel}
+              disabled={saveMcp.isPending}
+            >
+              Cancel
+            </Button>
+            <Button
+              size="sm"
+              className="h-7 px-2.5 text-xs"
+              onClick={handleSave}
+              disabled={saveMcp.isPending || !!jsonError}
+            >
+              {saveMcp.isPending ? "Saving…" : "Save"}
+            </Button>
+          </div>
+        )}
+      </div>
+      <div className="space-y-1">
+        {isLoading ? (
+          <p className="text-xs text-muted-foreground">Loading…</p>
+        ) : (
+          <Textarea
+            className="font-mono text-xs min-h-[160px] resize-y"
+            placeholder="{}"
+            value={displayValue}
+            onChange={(e) => handleChange(e.target.value)}
+          />
+        )}
+        {jsonError && (
+          <p className="text-xs text-destructive">{jsonError}</p>
+        )}
+        {saveMcp.isError && (
+          <p className="text-xs text-destructive">
+            {saveMcp.error instanceof Error ? saveMcp.error.message : "Save failed"}
+          </p>
+        )}
+      </div>
+    </div>
+  );
+}
+
 /* ---- Agent Configure Page ---- */
 
 function AgentConfigurePage({
@@ -1077,6 +1184,8 @@ function AgentConfigurePage({
         <h3 className="text-sm font-medium mb-3">API Keys</h3>
         <KeysTab agentId={agentId} companyId={companyId} />
       </div>
+
+      <McpConfigEditor agentId={agent.id} companyId={companyId} />
 
       {/* Configuration Revisions — collapsible at the bottom */}
       <div>

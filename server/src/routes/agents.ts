@@ -1,5 +1,6 @@
 import { Router, type Request } from "express";
 import { randomUUID } from "node:crypto";
+import fs from "node:fs/promises";
 import path from "node:path";
 import type { Db } from "@paperclipai/db";
 import { agents as agentsTable, companies, heartbeatRuns } from "@paperclipai/db";
@@ -29,6 +30,7 @@ import {
 } from "../services/index.js";
 import { conflict, forbidden, unprocessable } from "../errors.js";
 import { assertBoard, assertCompanyAccess, getActorInfo } from "./authz.js";
+import { resolveDefaultAgentWorkspaceDir } from "../home-paths.js";
 import { findServerAdapter, listAdapterModels } from "../adapters/index.js";
 import { redactEventPayload } from "../redaction.js";
 import { runClaudeLogin } from "@paperclipai/adapter-claude-local/server";
@@ -1390,6 +1392,74 @@ export function agentRoutes(db: Db) {
       agentName: agent.name,
       adapterType: agent.adapterType,
     });
+  });
+
+  // ---- MCP config file (.mcp.json in agent workspace dir) ----
+
+  router.get("/agents/:id/mcp-config", async (req, res) => {
+    const id = await normalizeAgentReference(req, req.params.id as string);
+    const existing = await svc.getById(id);
+    if (!existing) {
+      res.status(404).json({ error: "Agent not found" });
+      return;
+    }
+    await assertCanUpdateAgent(req, existing);
+
+    const mcpPath = path.join(resolveDefaultAgentWorkspaceDir(existing.id), ".mcp.json");
+    try {
+      const raw = await fs.readFile(mcpPath, "utf-8");
+      res.json({ content: raw });
+    } catch (err: unknown) {
+      if ((err as NodeJS.ErrnoException).code === "ENOENT") {
+        res.json({ content: null });
+      } else {
+        throw err;
+      }
+    }
+  });
+
+  router.put("/agents/:id/mcp-config", async (req, res) => {
+    const id = await normalizeAgentReference(req, req.params.id as string);
+    const existing = await svc.getById(id);
+    if (!existing) {
+      res.status(404).json({ error: "Agent not found" });
+      return;
+    }
+    await assertCanUpdateAgent(req, existing);
+
+    const { content } = req.body as { content: string };
+    if (typeof content !== "string") {
+      res.status(422).json({ error: "content must be a string" });
+      return;
+    }
+
+    // Validate it's valid JSON
+    try {
+      JSON.parse(content);
+    } catch {
+      res.status(422).json({ error: "content must be valid JSON" });
+      return;
+    }
+
+    const workspaceDir = resolveDefaultAgentWorkspaceDir(existing.id);
+    await fs.mkdir(workspaceDir, { recursive: true });
+    const mcpPath = path.join(workspaceDir, ".mcp.json");
+    await fs.writeFile(mcpPath, content, "utf-8");
+
+    const actor = getActorInfo(req);
+    await logActivity(db, {
+      companyId: existing.companyId,
+      actorType: actor.actorType,
+      actorId: actor.actorId,
+      agentId: actor.agentId,
+      runId: actor.runId,
+      action: "agent.mcp_config_updated",
+      entityType: "agent",
+      entityId: existing.id,
+      details: { path: mcpPath },
+    });
+
+    res.json({ ok: true, path: mcpPath });
   });
 
   return router;

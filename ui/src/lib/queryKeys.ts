@@ -11,6 +11,7 @@ export const queryKeys = {
     taskSessions: (id: string) => ["agents", "task-sessions", id] as const,
     keys: (agentId: string) => ["agents", "keys", agentId] as const,
     configRevisions: (agentId: string) => ["agents", "config-revisions", agentId] as const,
+    mcpConfig: (agentId: string) => ["agents", "mcp-config", agentId] as const,
   },
   issues: {
     list: (companyId: string) => ["issues", companyId] as const,
