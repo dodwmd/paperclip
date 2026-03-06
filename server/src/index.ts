@@ -26,7 +26,7 @@ import { loadConfig } from "./config.js";
 import { logger } from "./middleware/logger.js";
 import { setupLiveEventsWebSocketServer } from "./realtime/live-events-ws.js";
 import { heartbeatService } from "./services/index.js";
-import { ensureAgentHomeDirsForAll } from "./agent-home.js";
+import { ensureAgentHomeDirsForAll, migrateInstructionFilesToAgentHome } from "./agent-home.js";
 import { createStorageServiceFromConfig } from "./storage/index.js";
 import { printStartupBanner } from "./startup-banner.js";
 import { getBoardClaimWarningUrl, initializeBoardClaimChallenge } from "./board-claim.js";
@@ -469,19 +469,44 @@ setupLiveEventsWebSocketServer(server, db as any, {
   resolveSessionFromHeaders,
 });
 
-// Bootstrap per-agent home directories for all existing agents
-void (db as any)
-  .select({ id: agentsTable.id })
-  .from(agentsTable)
-  .then((rows: { id: string }[]) => ensureAgentHomeDirsForAll(rows.map((r) => r.id)))
-  .then((failures: { agentId: string; error: unknown }[]) => {
-    if (failures.length > 0) {
-      logger.warn({ failures }, "some agent home dirs could not be created at startup");
+// Bootstrap per-agent home directories and migrate instruction files
+void (async () => {
+  try {
+    const rows: { id: string; adapterConfig: unknown }[] = await (db as any)
+      .select({ id: agentsTable.id, adapterConfig: agentsTable.adapterConfig })
+      .from(agentsTable);
+
+    const homeDirFailures = await ensureAgentHomeDirsForAll(rows.map((r) => r.id));
+    if (homeDirFailures.length > 0) {
+      logger.warn({ failures: homeDirFailures }, "some agent home dirs could not be created at startup");
     }
-  })
-  .catch((err: unknown) => {
+
+    // Migrate instruction files from shared workspace → agent home
+    for (const row of rows) {
+      try {
+        const cfg = (typeof row.adapterConfig === "object" && row.adapterConfig !== null)
+          ? row.adapterConfig as Record<string, unknown>
+          : {};
+        const existingPath = typeof cfg.instructionsFilePath === "string" ? cfg.instructionsFilePath : null;
+
+        const { agentsMdPath, anyCopied } = await migrateInstructionFilesToAgentHome(row.id, existingPath);
+
+        // Update instructionsFilePath in DB if it has changed
+        const needsUpdate = existingPath !== agentsMdPath;
+        if (anyCopied || needsUpdate) {
+          await (db as any)
+            .update(agentsTable)
+            .set({ adapterConfig: { ...cfg, instructionsFilePath: agentsMdPath } })
+            .where(eq(agentsTable.id, row.id));
+        }
+      } catch (err) {
+        logger.warn({ err, agentId: row.id }, "instruction file migration failed for agent");
+      }
+    }
+  } catch (err) {
     logger.error({ err }, "startup agent home dir bootstrap failed");
-  });
+  }
+})();
 
 if (config.heartbeatSchedulerEnabled) {
   const heartbeat = heartbeatService(db as any);

@@ -150,6 +150,10 @@ export const agentsApi = {
       agentPath(id, companyId, "/run-claude-slash-command"),
       { slashCommand },
     ),
+  getInstructionFile: (id: string, filename: string, companyId?: string) =>
+    api.get<{ content: string | null }>(agentPath(id, companyId, `/instruction-files/${encodeURIComponent(filename)}`)),
+  updateInstructionFile: (id: string, filename: string, content: string, companyId?: string) =>
+    api.put<{ ok: true; path: string }>(agentPath(id, companyId, `/instruction-files/${encodeURIComponent(filename)}`), { content }),
   getMcpConfig: (id: string, companyId?: string) =>
     api.get<{ content: string | null }>(agentPath(id, companyId, "/mcp-config")),
   updateMcpConfig: (id: string, content: string, companyId?: string) =>

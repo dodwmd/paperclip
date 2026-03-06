@@ -1025,6 +1025,94 @@ function CostsSection({
   );
 }
 
+/* ---- Instruction File Editor ---- */
+
+const INSTRUCTION_FILES = ["AGENTS.md", "HEARTBEAT.md", "SOUL.md", "TOOLS.md"] as const;
+type InstructionFileName = (typeof INSTRUCTION_FILES)[number];
+
+const INSTRUCTION_FILE_DESCRIPTIONS: Record<InstructionFileName, string> = {
+  "AGENTS.md": "Primary instructions — appended to system prompt on every run",
+  "HEARTBEAT.md": "Heartbeat checklist — what to do each cycle",
+  "SOUL.md": "Persona — the agent's identity and values",
+  "TOOLS.md": "Tool notes — learned knowledge about available tools",
+};
+
+function InstructionFileEditor({
+  agentId,
+  companyId,
+  filename,
+}: {
+  agentId: string;
+  companyId?: string;
+  filename: InstructionFileName;
+}) {
+  const queryClient = useQueryClient();
+  const [draft, setDraft] = useState<string | null>(null);
+
+  const { data, isLoading } = useQuery({
+    queryKey: queryKeys.agents.instructionFile(agentId, filename),
+    queryFn: () => agentsApi.getInstructionFile(agentId, filename, companyId),
+  });
+
+  const currentContent = data?.content ?? "";
+  const displayValue = draft ?? currentContent;
+  const isDirty = draft !== null && draft !== currentContent;
+
+  useEffect(() => {
+    setDraft(null);
+  }, [agentId, filename]);
+
+  const save = useMutation({
+    mutationFn: (content: string) => agentsApi.updateInstructionFile(agentId, filename, content, companyId),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.agents.instructionFile(agentId, filename) });
+      setDraft(null);
+    },
+  });
+
+  return (
+    <div className="space-y-1">
+      <div className="flex items-center justify-between">
+        <div>
+          <span className="text-xs font-medium font-mono">{filename}</span>
+          <span className="text-xs text-muted-foreground ml-2">{INSTRUCTION_FILE_DESCRIPTIONS[filename]}</span>
+        </div>
+        {isDirty && (
+          <div className="flex items-center gap-1.5">
+            <Button size="sm" variant="outline" className="h-6 px-2 text-xs" onClick={() => setDraft(null)} disabled={save.isPending}>Cancel</Button>
+            <Button size="sm" className="h-6 px-2 text-xs" onClick={() => save.mutate(draft ?? "")} disabled={save.isPending}>{save.isPending ? "Saving…" : "Save"}</Button>
+          </div>
+        )}
+      </div>
+      {isLoading ? (
+        <p className="text-xs text-muted-foreground">Loading…</p>
+      ) : (
+        <Textarea
+          className="font-mono text-xs min-h-[120px] resize-y"
+          value={displayValue}
+          onChange={(e) => setDraft(e.target.value)}
+        />
+      )}
+      {save.isError && (
+        <p className="text-xs text-destructive">{save.error instanceof Error ? save.error.message : "Save failed"}</p>
+      )}
+    </div>
+  );
+}
+
+function InstructionFilesSection({ agentId, companyId }: { agentId: string; companyId?: string }) {
+  return (
+    <div>
+      <h3 className="text-sm font-medium mb-3">Instructions</h3>
+      <div className="space-y-4">
+        {INSTRUCTION_FILES.map((filename) => (
+          <InstructionFileEditor key={filename} agentId={agentId} companyId={companyId} filename={filename} />
+        ))}
+      </div>
+    </div>
+  );
+}
+
 /* ---- Claude Slash Command Runner ---- */
 
 type ParsedLine =
@@ -1355,6 +1443,8 @@ function AgentConfigurePage({
         <h3 className="text-sm font-medium mb-3">API Keys</h3>
         <KeysTab agentId={agentId} companyId={companyId} />
       </div>
+
+      <InstructionFilesSection agentId={agent.id} companyId={companyId} />
 
       <McpConfigEditor agentId={agent.id} companyId={companyId} />
 

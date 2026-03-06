@@ -31,7 +31,7 @@ import {
 import { conflict, forbidden, unprocessable } from "../errors.js";
 import { assertBoard, assertCompanyAccess, getActorInfo } from "./authz.js";
 import { resolveDefaultAgentWorkspaceDir, resolveDefaultAgentHomeDir } from "../home-paths.js";
-import { ensureAgentHomeDir } from "../agent-home.js";
+import { ensureAgentHomeDir, readInstructionFile, writeInstructionFile, INSTRUCTION_FILES, type InstructionFileName } from "../agent-home.js";
 import { findServerAdapter, listAdapterModels } from "../adapters/index.js";
 import { redactEventPayload } from "../redaction.js";
 import { runClaudeLogin, runClaudeSlashCommand } from "@paperclipai/adapter-claude-local/server";
@@ -1509,6 +1509,81 @@ export function agentRoutes(db: Db) {
     });
 
     res.json({ ok: true, path: mcpPath });
+  });
+
+  // ---- Instruction files (AGENTS.md, HEARTBEAT.md, SOUL.md, TOOLS.md) ----
+
+  router.get("/agents/:id/instruction-files/:filename", async (req, res) => {
+    const id = await normalizeAgentReference(req, req.params.id as string);
+    const existing = await svc.getById(id);
+    if (!existing) {
+      res.status(404).json({ error: "Agent not found" });
+      return;
+    }
+    await assertCanUpdateAgent(req, existing);
+
+    const filename = req.params.filename as string;
+    if (!(INSTRUCTION_FILES as readonly string[]).includes(filename)) {
+      res.status(422).json({ error: `Invalid filename. Allowed: ${INSTRUCTION_FILES.join(", ")}` });
+      return;
+    }
+
+    const content = await readInstructionFile(existing.id, filename as InstructionFileName);
+    res.json({ content });
+  });
+
+  router.put("/agents/:id/instruction-files/:filename", async (req, res) => {
+    const id = await normalizeAgentReference(req, req.params.id as string);
+    const existing = await svc.getById(id);
+    if (!existing) {
+      res.status(404).json({ error: "Agent not found" });
+      return;
+    }
+    await assertCanUpdateAgent(req, existing);
+
+    const filename = req.params.filename as string;
+    if (!(INSTRUCTION_FILES as readonly string[]).includes(filename)) {
+      res.status(422).json({ error: `Invalid filename. Allowed: ${INSTRUCTION_FILES.join(", ")}` });
+      return;
+    }
+
+    const { content } = req.body as { content?: unknown };
+    if (typeof content !== "string") {
+      res.status(422).json({ error: "content must be a string" });
+      return;
+    }
+
+    const filePath = await writeInstructionFile(existing.id, filename as InstructionFileName, content);
+
+    // When saving AGENTS.md, keep instructionsFilePath in sync
+    if (filename === "AGENTS.md") {
+      const existingAdapterConfig = asRecord(existing.adapterConfig) ?? {};
+      if (existingAdapterConfig.instructionsFilePath !== filePath) {
+        const actor = getActorInfo(req);
+        await svc.update(existing.id, { adapterConfig: { ...existingAdapterConfig, instructionsFilePath: filePath } }, {
+          recordRevision: {
+            createdByAgentId: actor.agentId,
+            createdByUserId: actor.actorType === "user" ? actor.actorId : null,
+            source: "instructions_path_patch",
+          },
+        });
+      }
+    }
+
+    const actor = getActorInfo(req);
+    await logActivity(db, {
+      companyId: existing.companyId,
+      actorType: actor.actorType,
+      actorId: actor.actorId,
+      agentId: actor.agentId,
+      runId: actor.runId,
+      action: "agent.instruction_file_updated",
+      entityType: "agent",
+      entityId: existing.id,
+      details: { filename, path: filePath },
+    });
+
+    res.json({ ok: true, path: filePath });
   });
 
   return router;

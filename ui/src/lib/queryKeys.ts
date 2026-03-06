@@ -12,6 +12,7 @@ export const queryKeys = {
     keys: (agentId: string) => ["agents", "keys", agentId] as const,
     configRevisions: (agentId: string) => ["agents", "config-revisions", agentId] as const,
     mcpConfig: (agentId: string) => ["agents", "mcp-config", agentId] as const,
+    instructionFile: (agentId: string, filename: string) => ["agents", "instruction-file", agentId, filename] as const,
   },
   issues: {
     list: (companyId: string) => ["issues", companyId] as const,
