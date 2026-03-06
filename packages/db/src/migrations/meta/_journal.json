@@ -173,8 +173,22 @@
     {
       "idx": 24,
       "version": "7",
+      "when": 1772806603601,
+      "tag": "0024_far_beast",
+      "breakpoints": true
+    },
+    {
+      "idx": 25,
+      "version": "7",
+      "when": 1772807461603,
+      "tag": "0025_nasty_salo",
+      "breakpoints": true
+    },
+    {
+      "idx": 26,
+      "version": "7",
       "when": 1772836441586,
-      "tag": "0024_noisy_moira_mactaggert",
+      "tag": "0026_noisy_moira_mactaggert",
       "breakpoints": true
     }
   ]

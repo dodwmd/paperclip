@@ -28,7 +28,7 @@ import {
   logActivity,
   secretService,
 } from "../services/index.js";
-import { conflict, forbidden, unprocessable } from "../errors.js";
+import { conflict, forbidden, notFound, unprocessable } from "../errors.js";
 import { assertBoard, assertCompanyAccess, getActorInfo } from "./authz.js";
 import { resolveDefaultAgentWorkspaceDir, resolveDefaultAgentHomeDir } from "../home-paths.js";
 import { ensureAgentHomeDir, readInstructionFile, writeInstructionFile, INSTRUCTION_FILES, type InstructionFileName } from "../agent-home.js";
@@ -40,7 +40,7 @@ import {
   DEFAULT_CODEX_LOCAL_MODEL,
 } from "@paperclipai/adapter-codex-local";
 import { DEFAULT_CURSOR_LOCAL_MODEL } from "@paperclipai/adapter-cursor-local";
-import { DEFAULT_OPENCODE_LOCAL_MODEL } from "@paperclipai/adapter-opencode-local";
+import { ensureOpenCodeModelConfiguredAndAvailable } from "@paperclipai/adapter-opencode-local/server";
 
 export function agentRoutes(db: Db) {
   const DEFAULT_INSTRUCTIONS_PATH_KEYS: Record<string, string> = {
@@ -155,7 +155,10 @@ export function agentRoutes(db: Db) {
     if (resolved.ambiguous) {
       throw conflict("Agent shortname is ambiguous in this company. Use the agent ID.");
     }
-    return resolved.agent?.id ?? raw;
+    if (!resolved.agent) {
+      throw notFound("Agent not found");
+    }
+    return resolved.agent.id;
   }
 
   function parseSourceIssueIds(input: {
@@ -198,13 +201,32 @@ export function agentRoutes(db: Db) {
       }
       return next;
     }
-    if (adapterType === "opencode_local" && !asNonEmptyString(next.model)) {
-      next.model = DEFAULT_OPENCODE_LOCAL_MODEL;
-    }
+    // OpenCode requires explicit model selection — no default
     if (adapterType === "cursor" && !asNonEmptyString(next.model)) {
       next.model = DEFAULT_CURSOR_LOCAL_MODEL;
     }
     return next;
+  }
+
+  async function assertAdapterConfigConstraints(
+    companyId: string,
+    adapterType: string | null | undefined,
+    adapterConfig: Record<string, unknown>,
+  ) {
+    if (adapterType !== "opencode_local") return;
+    const runtimeConfig = await secretsSvc.resolveAdapterConfigForRuntime(companyId, adapterConfig);
+    const runtimeEnv = asRecord(runtimeConfig.env) ?? {};
+    try {
+      await ensureOpenCodeModelConfiguredAndAvailable({
+        model: runtimeConfig.model,
+        command: runtimeConfig.command,
+        cwd: runtimeConfig.cwd,
+        env: runtimeEnv,
+      });
+    } catch (err) {
+      const reason = err instanceof Error ? err.message : String(err);
+      throw unprocessable(`Invalid opencode_local adapterConfig: ${reason}`);
+    }
   }
 
   function resolveInstructionsFilePath(candidatePath: string, adapterConfig: Record<string, unknown>) {
@@ -338,7 +360,9 @@ export function agentRoutes(db: Db) {
     }
   });
 
-  router.get("/adapters/:type/models", async (req, res) => {
+  router.get("/companies/:companyId/adapters/:type/models", async (req, res) => {
+    const companyId = req.params.companyId as string;
+    assertCompanyAccess(req, companyId);
     const type = req.params.type as string;
     const models = await listAdapterModels(type);
     res.json(models);
@@ -592,6 +616,11 @@ export function agentRoutes(db: Db) {
       requestedAdapterConfig,
       { strictMode: strictSecretsMode },
     );
+    await assertAdapterConfigConstraints(
+      companyId,
+      hireInput.adapterType,
+      normalizedAdapterConfig,
+    );
     const normalizedHireInput = {
       ...hireInput,
       adapterConfig: normalizedAdapterConfig,
@@ -726,6 +755,11 @@ export function agentRoutes(db: Db) {
       companyId,
       requestedAdapterConfig,
       { strictMode: strictSecretsMode },
+    );
+    await assertAdapterConfigConstraints(
+      companyId,
+      req.body.adapterType,
+      normalizedAdapterConfig,
     );
 
     const agent = await svc.create(companyId, {
@@ -903,6 +937,27 @@ export function agentRoutes(db: Db) {
         existing.companyId,
         adapterConfig,
         { strictMode: strictSecretsMode },
+      );
+    }
+
+    const requestedAdapterType =
+      typeof patchData.adapterType === "string" ? patchData.adapterType : existing.adapterType;
+    const touchesAdapterConfiguration =
+      Object.prototype.hasOwnProperty.call(patchData, "adapterType") ||
+      Object.prototype.hasOwnProperty.call(patchData, "adapterConfig");
+    if (touchesAdapterConfiguration && requestedAdapterType === "opencode_local") {
+      const rawEffectiveAdapterConfig = Object.prototype.hasOwnProperty.call(patchData, "adapterConfig")
+        ? (asRecord(patchData.adapterConfig) ?? {})
+        : (asRecord(existing.adapterConfig) ?? {});
+      const effectiveAdapterConfig = await secretsSvc.normalizeAdapterConfigForPersistence(
+        existing.companyId,
+        rawEffectiveAdapterConfig,
+        { strictMode: strictSecretsMode },
+      );
+      await assertAdapterConfigConstraints(
+        existing.companyId,
+        requestedAdapterType,
+        effectiveAdapterConfig,
       );
     }
 

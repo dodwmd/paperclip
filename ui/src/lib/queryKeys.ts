@@ -13,12 +13,16 @@ export const queryKeys = {
     configRevisions: (agentId: string) => ["agents", "config-revisions", agentId] as const,
     mcpConfig: (agentId: string) => ["agents", "mcp-config", agentId] as const,
     instructionFile: (agentId: string, filename: string) => ["agents", "instruction-file", agentId, filename] as const,
+    adapterModels: (companyId: string, adapterType: string) =>
+      ["agents", companyId, "adapter-models", adapterType] as const,
   },
   issues: {
     list: (companyId: string) => ["issues", companyId] as const,
     search: (companyId: string, q: string, projectId?: string) =>
       ["issues", companyId, "search", q, projectId ?? "__all-projects__"] as const,
     listAssignedToMe: (companyId: string) => ["issues", companyId, "assigned-to-me"] as const,
+    listTouchedByMe: (companyId: string) => ["issues", companyId, "touched-by-me"] as const,
+    listUnreadTouchedByMe: (companyId: string) => ["issues", companyId, "unread-touched-by-me"] as const,
     labels: (companyId: string) => ["issues", companyId, "labels"] as const,
     listByProject: (companyId: string, projectId: string) =>
       ["issues", companyId, "project", projectId] as const,
