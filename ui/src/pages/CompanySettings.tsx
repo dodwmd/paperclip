@@ -1,18 +1,20 @@
 import { useEffect, useState } from "react";
-import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useCompany } from "../context/CompanyContext";
 import { useBreadcrumbs } from "../context/BreadcrumbContext";
 import { companiesApi } from "../api/companies";
 import { accessApi } from "../api/access";
+import { secretsApi } from "../api/secrets";
 import { queryKeys } from "../lib/queryKeys";
 import { Button } from "@/components/ui/button";
-import { Settings, Check } from "lucide-react";
+import { Settings, Check, Eye, EyeOff, RotateCcw, Trash2, Plus, KeyRound } from "lucide-react";
 import { CompanyPatternIcon } from "../components/CompanyPatternIcon";
 import {
   Field,
   ToggleField,
   HintIcon
 } from "../components/agent-config-primitives";
+import type { CompanySecret } from "@paperclipai/shared";
 
 type AgentSnippetInput = {
   onboardingTextUrl: string;
@@ -381,6 +383,9 @@ export function CompanySettings() {
         </div>
       </div>
 
+      {/* Secrets */}
+      <SecretsSection companyId={selectedCompanyId!} />
+
       {/* Danger Zone */}
       <div className="space-y-4">
         <div className="text-xs font-medium text-destructive uppercase tracking-wide">
@@ -432,6 +437,285 @@ export function CompanySettings() {
             )}
           </div>
         </div>
+      </div>
+    </div>
+  );
+}
+
+function SecretsSection({ companyId }: { companyId: string }) {
+  const queryClient = useQueryClient();
+  const [showAddForm, setShowAddForm] = useState(false);
+  const [newName, setNewName] = useState("");
+  const [newValue, setNewValue] = useState("");
+  const [newDescription, setNewDescription] = useState("");
+  const [showNewValue, setShowNewValue] = useState(false);
+  const [rotatingId, setRotatingId] = useState<string | null>(null);
+  const [rotateValue, setRotateValue] = useState("");
+  const [showRotateValue, setShowRotateValue] = useState(false);
+
+  const { data: secrets = [], isLoading } = useQuery({
+    queryKey: queryKeys.secrets.list(companyId),
+    queryFn: () => secretsApi.list(companyId),
+  });
+
+  const createMutation = useMutation({
+    mutationFn: (data: { name: string; value: string; description?: string }) =>
+      secretsApi.create(companyId, data),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.secrets.list(companyId) });
+      setShowAddForm(false);
+      setNewName("");
+      setNewValue("");
+      setNewDescription("");
+      setShowNewValue(false);
+    },
+  });
+
+  const rotateMutation = useMutation({
+    mutationFn: ({ id, value }: { id: string; value: string }) =>
+      secretsApi.rotate(id, { value }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.secrets.list(companyId) });
+      setRotatingId(null);
+      setRotateValue("");
+      setShowRotateValue(false);
+    },
+  });
+
+  const deleteMutation = useMutation({
+    mutationFn: (id: string) => secretsApi.remove(id),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.secrets.list(companyId) });
+    },
+  });
+
+  function handleCreate() {
+    if (!newName.trim() || !newValue.trim()) return;
+    createMutation.mutate({
+      name: newName.trim(),
+      value: newValue,
+      description: newDescription.trim() || undefined,
+    });
+  }
+
+  function handleRotate(secret: CompanySecret) {
+    if (!rotateValue.trim()) return;
+    rotateMutation.mutate({ id: secret.id, value: rotateValue });
+  }
+
+  function handleDelete(secret: CompanySecret) {
+    if (!window.confirm(`Delete secret "${secret.name}"? This cannot be undone.`)) return;
+    deleteMutation.mutate(secret.id);
+  }
+
+  return (
+    <div className="space-y-4">
+      <div className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
+        Secrets
+      </div>
+      <div className="space-y-2 rounded-md border border-border px-4 py-4">
+        <div className="flex items-center justify-between gap-2">
+          <div className="flex items-center gap-1.5">
+            <KeyRound className="h-3.5 w-3.5 text-muted-foreground" />
+            <span className="text-xs text-muted-foreground">
+              Encrypted key/value secrets agents can retrieve at runtime.
+            </span>
+            <HintIcon text="Agents can list secrets by name and retrieve values via the Paperclip API. Values are never shown in the UI." />
+          </div>
+          {!showAddForm && (
+            <Button size="sm" variant="ghost" onClick={() => setShowAddForm(true)}>
+              <Plus className="h-3.5 w-3.5 mr-1" />
+              Add secret
+            </Button>
+          )}
+        </div>
+
+        {showAddForm && (
+          <div className="mt-3 space-y-2 rounded-md border border-border bg-muted/20 px-3 py-3">
+            <div className="text-xs font-medium">New secret</div>
+            <Field label="Name" hint="A unique identifier, e.g. sonarr-api-key">
+              <input
+                className="w-full rounded-md border border-border bg-transparent px-2.5 py-1.5 text-sm font-mono outline-none"
+                type="text"
+                placeholder="e.g. sonarr-api-key"
+                value={newName}
+                onChange={(e) => setNewName(e.target.value)}
+              />
+            </Field>
+            <Field label="Value" hint="The secret value — stored encrypted, never shown again.">
+              <div className="flex items-center gap-1.5">
+                <input
+                  className="flex-1 rounded-md border border-border bg-transparent px-2.5 py-1.5 text-sm font-mono outline-none"
+                  type={showNewValue ? "text" : "password"}
+                  placeholder="Secret value"
+                  value={newValue}
+                  onChange={(e) => setNewValue(e.target.value)}
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowNewValue((v) => !v)}
+                  className="text-muted-foreground hover:text-foreground"
+                >
+                  {showNewValue ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                </button>
+              </div>
+            </Field>
+            <Field label="Description" hint="Optional — helps agents identify which secret to use.">
+              <input
+                className="w-full rounded-md border border-border bg-transparent px-2.5 py-1.5 text-sm outline-none"
+                type="text"
+                placeholder="e.g. Sonarr API key for TV show automation"
+                value={newDescription}
+                onChange={(e) => setNewDescription(e.target.value)}
+              />
+            </Field>
+            <div className="flex items-center gap-2 pt-1">
+              <Button
+                size="sm"
+                onClick={handleCreate}
+                disabled={createMutation.isPending || !newName.trim() || !newValue.trim()}
+              >
+                {createMutation.isPending ? "Saving..." : "Save secret"}
+              </Button>
+              <Button
+                size="sm"
+                variant="ghost"
+                onClick={() => {
+                  setShowAddForm(false);
+                  setNewName("");
+                  setNewValue("");
+                  setNewDescription("");
+                  setShowNewValue(false);
+                  createMutation.reset();
+                }}
+              >
+                Cancel
+              </Button>
+              {createMutation.isError && (
+                <span className="text-xs text-destructive">
+                  {createMutation.error instanceof Error
+                    ? createMutation.error.message
+                    : "Failed to save"}
+                </span>
+              )}
+            </div>
+          </div>
+        )}
+
+        {isLoading && (
+          <div className="py-4 text-center text-xs text-muted-foreground">Loading secrets…</div>
+        )}
+
+        {!isLoading && secrets.length === 0 && !showAddForm && (
+          <div className="py-4 text-center text-xs text-muted-foreground">
+            No secrets yet. Add one to let agents access credentials at runtime.
+          </div>
+        )}
+
+        {secrets.length > 0 && (
+          <div className="mt-2 divide-y divide-border rounded-md border border-border">
+            {secrets.map((secret) => (
+              <div key={secret.id} className="px-3 py-2.5">
+                <div className="flex items-start justify-between gap-2">
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-2">
+                      <span className="font-mono text-sm font-medium">{secret.name}</span>
+                      <span className="rounded bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground">
+                        v{secret.latestVersion}
+                      </span>
+                      {secret.provider !== "local_encrypted" && (
+                        <span className="rounded bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground">
+                          {secret.provider}
+                        </span>
+                      )}
+                    </div>
+                    {secret.description && (
+                      <div className="mt-0.5 text-xs text-muted-foreground">{secret.description}</div>
+                    )}
+                    <div className="mt-0.5 font-mono text-xs text-muted-foreground tracking-widest">
+                      ••••••••••••
+                    </div>
+                  </div>
+                  <div className="flex shrink-0 items-center gap-1">
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      className="h-7 px-2 text-xs"
+                      onClick={() => {
+                        setRotatingId(rotatingId === secret.id ? null : secret.id);
+                        setRotateValue("");
+                        setShowRotateValue(false);
+                        rotateMutation.reset();
+                      }}
+                      title="Rotate secret"
+                    >
+                      <RotateCcw className="h-3.5 w-3.5" />
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      className="h-7 px-2 text-xs text-destructive hover:text-destructive"
+                      onClick={() => handleDelete(secret)}
+                      disabled={deleteMutation.isPending}
+                      title="Delete secret"
+                    >
+                      <Trash2 className="h-3.5 w-3.5" />
+                    </Button>
+                  </div>
+                </div>
+
+                {rotatingId === secret.id && (
+                  <div className="mt-2 space-y-2 rounded-md border border-border bg-muted/20 px-3 py-2">
+                    <div className="text-xs font-medium">New value for <span className="font-mono">{secret.name}</span></div>
+                    <div className="flex items-center gap-1.5">
+                      <input
+                        className="flex-1 rounded-md border border-border bg-transparent px-2.5 py-1.5 text-sm font-mono outline-none"
+                        type={showRotateValue ? "text" : "password"}
+                        placeholder="New secret value"
+                        value={rotateValue}
+                        onChange={(e) => setRotateValue(e.target.value)}
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setShowRotateValue((v) => !v)}
+                        className="text-muted-foreground hover:text-foreground"
+                      >
+                        {showRotateValue ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                      </button>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <Button
+                        size="sm"
+                        onClick={() => handleRotate(secret)}
+                        disabled={rotateMutation.isPending || !rotateValue.trim()}
+                      >
+                        {rotateMutation.isPending ? "Rotating..." : "Rotate"}
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        onClick={() => {
+                          setRotatingId(null);
+                          setRotateValue("");
+                          setShowRotateValue(false);
+                        }}
+                      >
+                        Cancel
+                      </Button>
+                      {rotateMutation.isError && (
+                        <span className="text-xs text-destructive">
+                          {rotateMutation.error instanceof Error
+                            ? rotateMutation.error.message
+                            : "Rotation failed"}
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
       </div>
     </div>
   );

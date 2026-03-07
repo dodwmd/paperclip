@@ -312,7 +312,7 @@ export async function execute(ctx: AdapterExecutionContext): Promise<AdapterExec
 
   const promptTemplate = asString(
     config.promptTemplate,
-    "You are agent {{agent.id}} ({{agent.name}}). Continue your Paperclip work.",
+    "You are {{agent.name}} (id: {{agent.id}}, role: {{agent.role}}). Wake reason: {{context.wakeReason}}. Task ID: {{context.taskId}}. Wake comment ID: {{context.wakeCommentId}}. Approval ID: {{context.approvalId}}. Follow your Paperclip heartbeat procedure.",
   );
   const model = asString(config.model, "");
   const effort = asString(config.effort, "");

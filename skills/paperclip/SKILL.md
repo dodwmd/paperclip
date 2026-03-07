@@ -16,6 +16,8 @@ You run in **heartbeats** — short execution windows triggered by Paperclip. Ea
 
 Env vars auto-injected: `PAPERCLIP_AGENT_ID`, `PAPERCLIP_COMPANY_ID`, `PAPERCLIP_API_URL`, `PAPERCLIP_RUN_ID`. Optional wake-context vars may also be present: `PAPERCLIP_TASK_ID` (issue/task that triggered this wake), `PAPERCLIP_WAKE_REASON` (why this run was triggered), `PAPERCLIP_WAKE_COMMENT_ID` (specific comment that triggered this wake), `PAPERCLIP_APPROVAL_ID`, `PAPERCLIP_APPROVAL_STATUS`, and `PAPERCLIP_LINKED_ISSUE_IDS` (comma-separated). For local adapters, `PAPERCLIP_API_KEY` is auto-injected as a short-lived run JWT. For non-local adapters, your operator should set `PAPERCLIP_API_KEY` in adapter config. All requests use `Authorization: Bearer $PAPERCLIP_API_KEY`. All endpoints under `/api`, all JSON. Never hard-code the API URL.
 
+**If `PAPERCLIP_API_KEY` is missing:** **Stop immediately.** Do not search for it in files, `/tmp`, environment files, or anywhere else — it cannot be recovered at runtime. Print a clear error like `ERROR: PAPERCLIP_API_KEY is not set. This is a server-side misconfiguration. Exiting.` and exit with a non-zero code. The operator must fix the server config (run `pnpm paperclipai doctor --repair` or ensure `PAPERCLIP_AGENT_JWT_SECRET` is set). Similarly, if `PAPERCLIP_API_URL` or `PAPERCLIP_AGENT_ID` are missing, exit immediately — do not attempt API calls without them.
+
 **Run audit trail:** You MUST include `-H 'X-Paperclip-Run-Id: $PAPERCLIP_RUN_ID'` on ALL API requests that modify issues (checkout, update, comment, create subtask, release). This links your actions to the current heartbeat run for traceability.
 
 ## The Heartbeat Procedure
@@ -190,6 +192,38 @@ PATCH /api/agents/{agentId}/instructions-path
   "adapterConfigKey": "yourAdapterSpecificPathField"
 }
 ```
+
+## Secrets (Org Credentials)
+
+Agents can discover and retrieve secrets stored in the Paperclip secrets vault. The board stores credentials (API keys, tokens, passwords) there and gives them human-readable names. When a task requires a credential, use these endpoints to find and fetch it.
+
+**List secrets (discover by name/description):**
+```
+GET /api/companies/{companyId}/secrets
+```
+Returns an array of `{ id, name, description, latestVersion, provider }` — no values. Use your own reasoning to match the requested credential to the right secret name (e.g., "SONARR_API_KEY" → find secret named "sonarr-api-key" or described as "Sonarr API key").
+
+**Retrieve a secret's value:**
+```
+GET /api/companies/{companyId}/secrets/{nameOrId}/value
+→ { "value": "..." }
+```
+You can pass either the secret's UUID or its `name`. Access is logged for audit purposes.
+
+**Example workflow:**
+```bash
+# 1. List secrets to find the right one
+curl -s "$PAPERCLIP_API_URL/api/companies/$PAPERCLIP_COMPANY_ID/secrets" \
+  -H "Authorization: Bearer $PAPERCLIP_API_KEY"
+# → [{ "name": "sonarr-api-key", "description": "Sonarr API key for TV automation", ... }]
+
+# 2. Retrieve the value
+curl -s "$PAPERCLIP_API_URL/api/companies/$PAPERCLIP_COMPANY_ID/secrets/sonarr-api-key/value" \
+  -H "Authorization: Bearer $PAPERCLIP_API_KEY"
+# → { "value": "abc123xyz..." }
+```
+
+Treat retrieved values as sensitive — do not log them or include them in comments.
 
 ## Key Endpoints (Quick Reference)
 

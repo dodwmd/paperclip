@@ -8,7 +8,7 @@ import {
   updateSecretSchema,
 } from "@paperclipai/shared";
 import { validate } from "../middleware/validate.js";
-import { assertBoard, assertCompanyAccess } from "./authz.js";
+import { assertBoard, assertCompanyAccess, getActorInfo } from "./authz.js";
 import { logActivity, secretService } from "../services/index.js";
 
 export function secretRoutes(db: Db) {
@@ -29,11 +29,32 @@ export function secretRoutes(db: Db) {
   });
 
   router.get("/companies/:companyId/secrets", async (req, res) => {
-    assertBoard(req);
     const companyId = req.params.companyId as string;
     assertCompanyAccess(req, companyId);
+    // Board sees full metadata; agents can only list (no values returned in list)
     const secrets = await svc.list(companyId);
     res.json(secrets);
+  });
+
+  router.get("/companies/:companyId/secrets/:name/value", async (req, res) => {
+    const companyId = req.params.companyId as string;
+    assertCompanyAccess(req, companyId);
+    const name = req.params.name as string;
+
+    const value = await svc.resolveSecretByName(companyId, name);
+
+    const actor = getActorInfo(req);
+    await logActivity(db, {
+      companyId,
+      actorType: actor.actorType,
+      actorId: actor.actorId,
+      action: "secret.accessed",
+      entityType: "secret",
+      entityId: name,
+      details: { name, agentId: actor.agentId },
+    });
+
+    res.json({ value });
   });
 
   router.post("/companies/:companyId/secrets", validate(createSecretSchema), async (req, res) => {

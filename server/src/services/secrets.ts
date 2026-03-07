@@ -331,6 +331,12 @@ export function secretService(db: Db) {
       return resolved;
     },
 
+    resolveSecretByName: async (companyId: string, name: string): Promise<string> => {
+      const secret = await getByName(companyId, name);
+      if (!secret) throw notFound("Secret not found");
+      return resolveSecretValue(companyId, secret.id, "latest");
+    },
+
     resolveAdapterConfigForRuntime: async (companyId: string, adapterConfig: Record<string, unknown>) => {
       const resolved = { ...adapterConfig };
       if (!Object.prototype.hasOwnProperty.call(adapterConfig, "env")) {
