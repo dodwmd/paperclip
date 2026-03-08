@@ -34,7 +34,7 @@ import { resolveDefaultAgentWorkspaceDir, resolveDefaultAgentHomeDir } from "../
 import { ensureAgentHomeDir, readInstructionFile, writeInstructionFile, INSTRUCTION_FILES, type InstructionFileName } from "../agent-home.js";
 import { findServerAdapter, listAdapterModels } from "../adapters/index.js";
 import { redactEventPayload } from "../redaction.js";
-import { runClaudeLogin, runClaudeSlashCommand } from "@paperclipai/adapter-claude-local/server";
+import { runClaudeLogin } from "@paperclipai/adapter-claude-local/server";
 import {
   DEFAULT_CODEX_LOCAL_BYPASS_APPROVALS_AND_SANDBOX,
   DEFAULT_CODEX_LOCAL_MODEL,
@@ -1250,49 +1250,6 @@ export function agentRoutes(db: Db) {
     res.json(result);
   });
 
-  router.post("/agents/:id/run-claude-slash-command", async (req, res) => {
-    assertBoard(req);
-    const id = req.params.id as string;
-    const agent = await svc.getById(id);
-    if (!agent) {
-      res.status(404).json({ error: "Agent not found" });
-      return;
-    }
-    assertCompanyAccess(req, agent.companyId);
-    if (agent.adapterType !== "claude_local") {
-      res.status(400).json({ error: "Slash commands are only supported for claude_local agents" });
-      return;
-    }
-
-    const { slashCommand } = req.body as { slashCommand?: unknown };
-    if (typeof slashCommand !== "string" || !slashCommand.trim().startsWith("/")) {
-      res.status(422).json({ error: "slashCommand must be a string starting with /" });
-      return;
-    }
-
-    const config = asRecord(agent.adapterConfig) ?? {};
-    const runtimeConfig = await secretsSvc.resolveAdapterConfigForRuntime(agent.companyId, config);
-    const agentHomeDirForSlash = await ensureAgentHomeDir(agent.id).catch(() => resolveDefaultAgentHomeDir(agent.id));
-    const runtimeConfigWithHomeForSlash = {
-      ...runtimeConfig,
-      env: { HOME: agentHomeDirForSlash, ...((runtimeConfig.env as Record<string, unknown>) ?? {}) },
-    };
-    const result = await runClaudeSlashCommand({
-      runId: `claude-slash-${randomUUID()}`,
-      agent: {
-        id: agent.id,
-        companyId: agent.companyId,
-        name: agent.name,
-        adapterType: agent.adapterType,
-        adapterConfig: agent.adapterConfig,
-      },
-      config: runtimeConfigWithHomeForSlash,
-      slashCommand: slashCommand.trim(),
-    });
-
-    res.json(result);
-  });
-
   router.get("/companies/:companyId/heartbeat-runs", async (req, res) => {
     const companyId = req.params.companyId as string;
     assertCompanyAccess(req, companyId);
@@ -1527,7 +1484,7 @@ export function agentRoutes(db: Db) {
     });
   });
 
-  // ---- MCP config file (.claude.json in agent home dir) ----
+  // ---- MCP config (.claude.json in agent home dir) — exposes only mcpServers ----
 
   router.get("/agents/:id/mcp-config", async (req, res) => {
     const id = await normalizeAgentReference(req, req.params.id as string);
@@ -1541,10 +1498,11 @@ export function agentRoutes(db: Db) {
     const mcpPath = path.join(resolveDefaultAgentHomeDir(existing.id), ".claude.json");
     try {
       const raw = await fs.readFile(mcpPath, "utf-8");
-      res.json({ content: raw });
+      const parsed = JSON.parse(raw) as Record<string, unknown>;
+      res.json({ mcpServers: (parsed.mcpServers as Record<string, unknown>) ?? {} });
     } catch (err: unknown) {
       if ((err as NodeJS.ErrnoException).code === "ENOENT") {
-        res.json({ content: null });
+        res.json({ mcpServers: {} });
       } else {
         throw err;
       }
@@ -1560,24 +1518,27 @@ export function agentRoutes(db: Db) {
     }
     await assertCanUpdateAgent(req, existing);
 
-    const { content } = req.body as { content: string };
-    if (typeof content !== "string") {
-      res.status(422).json({ error: "content must be a string" });
-      return;
-    }
-
-    // Validate it's valid JSON
-    try {
-      JSON.parse(content);
-    } catch {
-      res.status(422).json({ error: "content must be valid JSON" });
+    const { mcpServers } = req.body as { mcpServers?: unknown };
+    if (typeof mcpServers !== "object" || mcpServers === null || Array.isArray(mcpServers)) {
+      res.status(422).json({ error: "mcpServers must be an object" });
       return;
     }
 
     const homeDir = resolveDefaultAgentHomeDir(existing.id);
     await fs.mkdir(homeDir, { recursive: true });
     const mcpPath = path.join(homeDir, ".claude.json");
-    await fs.writeFile(mcpPath, content, "utf-8");
+
+    // Read existing .claude.json to preserve other keys (tokens, theme, etc.)
+    let existing_json: Record<string, unknown> = {};
+    try {
+      const raw = await fs.readFile(mcpPath, "utf-8");
+      existing_json = JSON.parse(raw) as Record<string, unknown>;
+    } catch {
+      // File missing or invalid — start fresh
+    }
+
+    const merged = { ...existing_json, mcpServers };
+    await fs.writeFile(mcpPath, JSON.stringify(merged, null, 2), "utf-8");
 
     const actor = getActorInfo(req);
     await logActivity(db, {

@@ -14,7 +14,7 @@ import { useDialog } from "../context/DialogContext";
 import { useBreadcrumbs } from "../context/BreadcrumbContext";
 import { queryKeys } from "../lib/queryKeys";
 import { AgentConfigForm } from "../components/AgentConfigForm";
-import { adapterLabels, roleLabels } from "../components/agent-config-primitives";
+import { adapterLabels, roleLabels, Field } from "../components/agent-config-primitives";
 import { getUIAdapter, buildTranscript } from "../adapters";
 import type { TranscriptEntry } from "../adapters";
 import { StatusBadge } from "../components/StatusBadge";
@@ -53,7 +53,18 @@ import {
   ChevronDown,
   ArrowLeft,
   Settings,
+  X,
 } from "lucide-react";
+import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
+import { Collapsible, CollapsibleTrigger, CollapsibleContent } from "@/components/ui/collapsible";
+import { Badge } from "@/components/ui/badge";
+import {
+  Select,
+  SelectTrigger,
+  SelectValue,
+  SelectContent,
+  SelectItem,
+} from "@/components/ui/select";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { AgentIcon, AgentIconPicker } from "../components/AgentIconPicker";
@@ -1115,279 +1126,458 @@ function InstructionFilesSection({ agentId, companyId }: { agentId: string; comp
   );
 }
 
-/* ---- Claude Slash Command Runner ---- */
+/* ---- MCP Config Editor ---- */
 
-type ParsedLine =
-  | { kind: "text"; text: string }
-  | { kind: "error"; text: string }
-  | { kind: "cost"; costUsd: number; inputTokens: number; outputTokens: number }
-  | { kind: "skip" };
+const mcpInputClass =
+  "w-full rounded-md border border-border px-2.5 py-1.5 bg-transparent outline-none text-sm font-mono placeholder:text-muted-foreground/40 focus:ring-1 focus:ring-ring";
 
-function parseClaudeOutputLine(raw: string): ParsedLine {
-  const trimmed = raw.trim();
-  if (!trimmed) return { kind: "skip" };
+type KVRow = { key: string; value: string };
 
-  let parsed: Record<string, unknown> | null = null;
-  try {
-    const v = JSON.parse(trimmed);
-    if (typeof v === "object" && v !== null && !Array.isArray(v)) parsed = v as Record<string, unknown>;
-  } catch { /* not json */ }
+type McpServerDraft =
+  | { type: "stdio"; name: string; command: string; argsText: string; env: KVRow[] }
+  | { type: "http"; name: string; url: string; headers: KVRow[] };
 
-  if (!parsed) return { kind: "text", text: trimmed };
+function kvRowsToObject(rows: KVRow[]): Record<string, string> | undefined {
+  const entries = rows.filter((r) => r.key.trim());
+  if (entries.length === 0) return undefined;
+  return Object.fromEntries(entries.map((r) => [r.key, r.value]));
+}
 
-  const type = typeof parsed.type === "string" ? parsed.type : "";
+function objectToKVRows(obj: Record<string, unknown> | undefined): KVRow[] {
+  const rows: KVRow[] = obj
+    ? Object.entries(obj).map(([k, v]) => ({ key: k, value: typeof v === "string" ? v : String(v) }))
+    : [];
+  rows.push({ key: "", value: "" });
+  return rows;
+}
 
-  if (type === "system") return { kind: "skip" };
-  if (type === "rate_limit_event") return { kind: "skip" };
-
-  if (type === "assistant") {
-    const msg = parsed.message as Record<string, unknown> | null ?? {};
-    const content = Array.isArray(msg.content) ? msg.content : [];
-    const texts: string[] = [];
-    for (const block of content) {
-      const b = block as Record<string, unknown>;
-      if (b.type === "text" && typeof b.text === "string" && b.text.trim()) {
-        texts.push(b.text.trim());
-      }
+function apiToServerDrafts(mcpServers: Record<string, unknown>): McpServerDraft[] {
+  return Object.entries(mcpServers).map(([name, raw]) => {
+    const s = (typeof raw === "object" && raw !== null ? raw : {}) as Record<string, unknown>;
+    if (s.type === "http") {
+      return {
+        type: "http",
+        name,
+        url: typeof s.url === "string" ? s.url : "",
+        headers: objectToKVRows(s.headers as Record<string, unknown> | undefined),
+      };
     }
-    return texts.length > 0 ? { kind: "text", text: texts.join("\n") } : { kind: "skip" };
-  }
-
-  if (type === "result") {
-    const pieces: string[] = [];
-    if (typeof parsed.result === "string" && parsed.result.trim()) pieces.push(parsed.result.trim());
-    if (parsed.is_error === true) {
-      const errors = Array.isArray(parsed.errors)
-        ? (parsed.errors as unknown[]).map((e) => (typeof e === "string" ? e : JSON.stringify(e))).join("; ")
-        : "";
-      return { kind: "error", text: errors || pieces[0] || "Command failed" };
-    }
-    const usage = parsed.usage as Record<string, unknown> ?? {};
-    const costUsd = typeof parsed.total_cost_usd === "number" ? parsed.total_cost_usd : 0;
-    const inputTokens = typeof usage.input_tokens === "number" ? usage.input_tokens : 0;
-    const outputTokens = typeof usage.output_tokens === "number" ? usage.output_tokens : 0;
     return {
-      kind: "cost",
-      costUsd,
-      inputTokens,
-      outputTokens,
+      type: "stdio",
+      name,
+      command: typeof s.command === "string" ? s.command : "",
+      argsText: Array.isArray(s.args) ? (s.args as unknown[]).map(String).join("\n") : "",
+      env: objectToKVRows(s.env as Record<string, unknown> | undefined),
     };
-  }
-
-  return { kind: "skip" };
-}
-
-function formatClaudeOutput(stdout: string): { lines: ParsedLine[]; hasJson: boolean } {
-  const raw = stdout.split("\n");
-  const hasJson = raw.some((l) => l.trim().startsWith("{"));
-  const lines = raw.map(parseClaudeOutputLine);
-  return { lines, hasJson };
-}
-
-function ClaudeSlashCommandRunner({ agentId, companyId }: { agentId: string; companyId?: string }) {
-  const [command, setCommand] = useState("");
-  const [result, setResult] = useState<{ exitCode: number | null; stdout: string; stderr: string; timedOut: boolean } | null>(null);
-
-  const run = useMutation({
-    mutationFn: (cmd: string) => agentsApi.runClaudeSlashCommand(agentId, cmd, companyId),
-    onSuccess: (data) => setResult(data),
   });
+}
 
-  function handleRun() {
-    const cmd = command.trim();
-    if (!cmd) return;
-    setResult(null);
-    run.mutate(cmd);
+function mcpServersToSave(servers: McpServerDraft[]): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  for (const s of servers) {
+    if (!s.name.trim()) continue;
+    if (s.type === "http") {
+      const entry: Record<string, unknown> = { type: "http", url: s.url };
+      const headers = kvRowsToObject(s.headers);
+      if (headers) entry.headers = headers;
+      out[s.name] = entry;
+    } else {
+      const entry: Record<string, unknown> = { type: "stdio", command: s.command };
+      const args = s.argsText.split("\n").map((a) => a.trim()).filter(Boolean);
+      if (args.length > 0) entry.args = args;
+      const env = kvRowsToObject(s.env);
+      if (env) entry.env = env;
+      out[s.name] = entry;
+    }
   }
+  return out;
+}
 
-  const parsed = result ? formatClaudeOutput(result.stdout) : null;
-  const visibleLines = parsed?.lines.filter((l) => l.kind !== "skip") ?? [];
-  const costLine = visibleLines.find((l) => l.kind === "cost") as Extract<ParsedLine, { kind: "cost" }> | undefined;
-  const textLines = visibleLines.filter((l) => l.kind === "text" || l.kind === "error");
-  const failed = result && (result.exitCode !== 0 || result.timedOut);
+function serversToJsonText(servers: McpServerDraft[]): string {
+  return JSON.stringify(mcpServersToSave(servers), null, 2);
+}
 
+function jsonTextToServers(text: string): McpServerDraft[] | null {
+  try {
+    const parsed = JSON.parse(text) as unknown;
+    if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) return null;
+    return apiToServerDrafts(parsed as Record<string, unknown>);
+  } catch {
+    return null;
+  }
+}
+
+function updateKVRow(rows: KVRow[], index: number, patch: Partial<KVRow>): KVRow[] {
+  const next = rows.map((r, i) => (i === index ? { ...r, ...patch } : r));
+  const last = next[next.length - 1];
+  if (last && (last.key.trim() || last.value.trim())) next.push({ key: "", value: "" });
+  return next;
+}
+
+function removeKVRow(rows: KVRow[], index: number): KVRow[] {
+  const next = rows.filter((_, i) => i !== index);
+  if (next.length === 0 || (next[next.length - 1]!.key.trim() || next[next.length - 1]!.value.trim())) {
+    next.push({ key: "", value: "" });
+  }
+  return next;
+}
+
+function KVRowList({
+  rows,
+  onChange,
+  keyPlaceholder = "KEY",
+  valuePlaceholder = "value",
+}: {
+  rows: KVRow[];
+  onChange: (rows: KVRow[]) => void;
+  keyPlaceholder?: string;
+  valuePlaceholder?: string;
+}) {
   return (
-    <div>
-      <h3 className="text-sm font-medium mb-3">Run Claude Command</h3>
-      <div className="space-y-2">
-        <div className="flex gap-2">
-          <Input
-            className="font-mono text-xs"
-            placeholder="/plugin marketplace add obra/superpowers-marketplace"
-            value={command}
-            onChange={(e) => setCommand(e.target.value)}
-            onKeyDown={(e) => { if (e.key === "Enter") handleRun(); }}
-            disabled={run.isPending}
-          />
-          <Button
-            size="sm"
-            onClick={handleRun}
-            disabled={run.isPending || !command.trim().startsWith("/")}
-          >
-            {run.isPending ? "Running…" : "Run"}
-          </Button>
-        </div>
-        {run.isError && (
-          <p className="text-xs text-destructive">
-            {run.error instanceof Error ? run.error.message : "Command failed"}
-          </p>
-        )}
-        {result && (
-          <div className={cn("border rounded-md p-3 space-y-2", failed ? "border-destructive/50" : "border-border")}>
-            {/* Status line */}
-            <div className="flex items-center gap-2 text-xs text-muted-foreground">
-              {result.timedOut ? (
-                <span className="text-destructive">Timed out</span>
-              ) : result.exitCode === 0 ? (
-                <span className="text-green-600 dark:text-green-400">Success</span>
-              ) : (
-                <span className="text-destructive">Exit {result.exitCode}</span>
-              )}
-              {costLine && (
-                <>
-                  <span>·</span>
-                  <span>${costLine.costUsd.toFixed(4)}</span>
-                  <span>·</span>
-                  <span>{(costLine.inputTokens + costLine.outputTokens).toLocaleString()} tokens</span>
-                </>
-              )}
-            </div>
-
-            {/* Text output */}
-            {textLines.length > 0 && (
-              <div className="space-y-1">
-                {textLines.map((line, i) => (
-                  <p
-                    key={i}
-                    className={cn(
-                      "text-xs whitespace-pre-wrap break-words",
-                      line.kind === "error" ? "text-destructive" : "",
-                    )}
-                  >
-                    {(line as Extract<ParsedLine, { kind: "text" | "error" }>).text}
-                  </p>
-                ))}
-              </div>
-            )}
-
-            {/* Raw stdout fallback (non-json output) */}
-            {!parsed?.hasJson && result.stdout.trim() && (
-              <pre className="text-xs font-mono whitespace-pre-wrap break-all max-h-48 overflow-y-auto">{result.stdout.trim()}</pre>
-            )}
-
-            {/* Stderr */}
-            {result.stderr.trim() && (
-              <pre className="text-xs font-mono whitespace-pre-wrap break-all max-h-24 overflow-y-auto text-muted-foreground border-t border-border pt-2">{result.stderr.trim()}</pre>
+    <div className="space-y-1">
+      {rows.map((row, i) => {
+        const isTrailing = i === rows.length - 1 && !row.key && !row.value;
+        return (
+          <div key={i} className="flex items-center gap-1.5">
+            <input
+              className={cn(mcpInputClass, "flex-[2]")}
+              placeholder={keyPlaceholder}
+              value={row.key}
+              onChange={(e) => onChange(updateKVRow(rows, i, { key: e.target.value }))}
+            />
+            <input
+              className={cn(mcpInputClass, "flex-[3]")}
+              placeholder={valuePlaceholder}
+              value={row.value}
+              onChange={(e) => onChange(updateKVRow(rows, i, { value: e.target.value }))}
+            />
+            {isTrailing ? (
+              <div className="w-[26px] shrink-0" />
+            ) : (
+              <button
+                type="button"
+                className="shrink-0 p-1 rounded hover:bg-destructive/10 text-muted-foreground hover:text-destructive transition-colors"
+                onClick={() => onChange(removeKVRow(rows, i))}
+              >
+                <X className="h-3.5 w-3.5" />
+              </button>
             )}
           </div>
-        )}
-      </div>
+        );
+      })}
     </div>
   );
 }
 
-/* ---- MCP Config Editor ---- */
+function McpServerCard({
+  server,
+  expanded,
+  onToggleExpand,
+  onUpdate,
+  onRemove,
+}: {
+  server: McpServerDraft;
+  expanded: boolean;
+  onToggleExpand: () => void;
+  onUpdate: (next: McpServerDraft) => void;
+  onRemove: () => void;
+}) {
+  const summary =
+    server.type === "stdio"
+      ? [server.command, ...server.argsText.split("\n").filter(Boolean).slice(0, 2)].filter(Boolean).join(" ") || "—"
+      : server.url || "—";
+
+  return (
+    <Collapsible open={expanded} onOpenChange={onToggleExpand}>
+      <div className="border border-border rounded-md">
+        <div className="flex items-center gap-2 px-3 py-2">
+          <CollapsibleTrigger asChild>
+            <button
+              type="button"
+              className="flex items-center gap-2 flex-1 min-w-0 text-left hover:opacity-80 transition-opacity"
+            >
+              {expanded
+                ? <ChevronDown className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                : <ChevronRight className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />}
+              <span className="text-sm font-mono font-medium truncate">
+                {server.name || <span className="text-muted-foreground italic">unnamed</span>}
+              </span>
+              <Badge variant="outline" className="shrink-0 text-[10px] px-1.5 py-0">{server.type}</Badge>
+              <span className="text-xs text-muted-foreground font-mono truncate flex-1">{summary}</span>
+            </button>
+          </CollapsibleTrigger>
+          <button
+            type="button"
+            className="shrink-0 p-1 rounded hover:bg-destructive/10 text-muted-foreground hover:text-destructive transition-colors"
+            onClick={(e) => { e.stopPropagation(); onRemove(); }}
+          >
+            <Trash2 className="h-3.5 w-3.5" />
+          </button>
+        </div>
+        <CollapsibleContent>
+          <div className="px-3 pb-3 pt-1 space-y-3 border-t border-border">
+            <Field label="Server name">
+              <input
+                className={mcpInputClass}
+                value={server.name}
+                onChange={(e) => onUpdate({ ...server, name: e.target.value })}
+                placeholder="my-server"
+              />
+            </Field>
+            <Field label="Type">
+              <Select
+                value={server.type}
+                onValueChange={(v) => {
+                  const name = server.name;
+                  if (v === "http") {
+                    onUpdate({ type: "http", name, url: "", headers: [{ key: "", value: "" }] });
+                  } else {
+                    onUpdate({ type: "stdio", name, command: "", argsText: "", env: [{ key: "", value: "" }] });
+                  }
+                }}
+              >
+                <SelectTrigger className="w-28 h-8 text-xs">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="stdio">stdio</SelectItem>
+                  <SelectItem value="http">http</SelectItem>
+                </SelectContent>
+              </Select>
+            </Field>
+
+            {server.type === "stdio" && (
+              <>
+                <Field label="Command">
+                  <input
+                    className={mcpInputClass}
+                    value={server.command}
+                    onChange={(e) => onUpdate({ ...server, command: e.target.value })}
+                    placeholder="npx"
+                  />
+                </Field>
+                <Field label="Args (one per line)">
+                  <textarea
+                    className={cn(mcpInputClass, "min-h-[56px] resize-y")}
+                    value={server.argsText}
+                    onChange={(e) => onUpdate({ ...server, argsText: e.target.value })}
+                    placeholder={"tsx\n/path/to/server.ts"}
+                  />
+                </Field>
+                <Field label="Environment variables">
+                  <KVRowList
+                    rows={server.env}
+                    onChange={(rows) => onUpdate({ ...server, env: rows })}
+                    keyPlaceholder="API_KEY"
+                    valuePlaceholder="value"
+                  />
+                </Field>
+              </>
+            )}
+
+            {server.type === "http" && (
+              <>
+                <Field label="URL">
+                  <input
+                    className={mcpInputClass}
+                    value={server.url}
+                    onChange={(e) => onUpdate({ ...server, url: e.target.value })}
+                    placeholder="https://api.example.com/mcp"
+                  />
+                </Field>
+                <Field label="Headers">
+                  <KVRowList
+                    rows={server.headers}
+                    onChange={(rows) => onUpdate({ ...server, headers: rows })}
+                    keyPlaceholder="Authorization"
+                    valuePlaceholder="Bearer token"
+                  />
+                </Field>
+              </>
+            )}
+          </div>
+        </CollapsibleContent>
+      </div>
+    </Collapsible>
+  );
+}
 
 function McpConfigEditor({ agentId, companyId }: { agentId: string; companyId?: string }) {
   const queryClient = useQueryClient();
-  const [draft, setDraft] = useState<string | null>(null);
+  const [activeTab, setActiveTab] = useState<"servers" | "json">("servers");
+  const [servers, setServers] = useState<McpServerDraft[]>([]);
+  const [jsonDraft, setJsonDraft] = useState<string | null>(null);
   const [jsonError, setJsonError] = useState<string | null>(null);
+  const [expandedServers, setExpandedServers] = useState<Set<number>>(new Set());
 
   const { data, isLoading } = useQuery({
     queryKey: queryKeys.agents.mcpConfig(agentId),
     queryFn: () => agentsApi.getMcpConfig(agentId, companyId),
   });
 
-  const currentContent = data?.content ?? "";
-  const displayValue = draft ?? currentContent;
+  const currentServers = useMemo(
+    () => (data ? mcpServersToSave(apiToServerDrafts(data.mcpServers)) : {}),
+    [data],
+  );
+  const currentJson = useMemo(() => JSON.stringify(currentServers, null, 2), [currentServers]);
 
   useEffect(() => {
-    setDraft(null);
+    setJsonDraft(null);
     setJsonError(null);
-  }, [agentId]);
+    setExpandedServers(new Set());
+    setActiveTab("servers");
+    setServers(data ? apiToServerDrafts(data.mcpServers) : []);
+  }, [agentId, data]);
 
   const saveMcp = useMutation({
-    mutationFn: (content: string) => agentsApi.updateMcpConfig(agentId, content, companyId),
+    mutationFn: (mcpServers: Record<string, unknown>) => agentsApi.updateMcpConfig(agentId, mcpServers, companyId),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: queryKeys.agents.mcpConfig(agentId) });
-      setDraft(null);
-      setJsonError(null);
     },
   });
 
-  function handleChange(value: string) {
-    setDraft(value);
-    if (value.trim() === "") {
+  const isDirty = useMemo(() => {
+    const effective =
+      activeTab === "json"
+        ? (jsonDraft ?? currentJson)
+        : serversToJsonText(servers);
+    return effective !== currentJson;
+  }, [activeTab, jsonDraft, servers, currentJson]);
+
+  function handleTabChange(tab: "servers" | "json") {
+    if (tab === "json") {
+      setJsonDraft(serversToJsonText(servers));
       setJsonError(null);
-      return;
+    } else {
+      const raw = jsonDraft ?? currentJson;
+      const parsed = jsonTextToServers(raw);
+      if (!parsed) {
+        setJsonError("Fix the JSON before switching to visual mode");
+        return;
+      }
+      setServers(parsed);
+      setJsonError(null);
     }
-    try {
-      JSON.parse(value);
-      setJsonError(null);
-    } catch (e: unknown) {
+    setActiveTab(tab);
+  }
+
+  function handleJsonChange(value: string) {
+    setJsonDraft(value);
+    if (!value.trim()) { setJsonError(null); return; }
+    try { JSON.parse(value); setJsonError(null); } catch (e: unknown) {
       setJsonError(e instanceof Error ? e.message : "Invalid JSON");
     }
   }
 
   function handleSave() {
-    const content = (draft ?? currentContent).trim();
     if (jsonError) return;
-    saveMcp.mutate(content === "" ? "{}" : content);
+    const mcpServers =
+      activeTab === "json"
+        ? (JSON.parse(jsonDraft ?? currentJson) as Record<string, unknown>)
+        : mcpServersToSave(servers);
+    saveMcp.mutate(mcpServers);
   }
 
   function handleCancel() {
-    setDraft(null);
+    setJsonDraft(null);
     setJsonError(null);
+    setActiveTab("servers");
+    setServers(data ? apiToServerDrafts(data.mcpServers) : []);
   }
 
-  const isDirty = draft !== null && draft !== currentContent;
+  function addServer() {
+    const newServer: McpServerDraft = { type: "stdio", name: "", command: "", argsText: "", env: [{ key: "", value: "" }] };
+    const nextServers = [...servers, newServer];
+    setServers(nextServers);
+    setExpandedServers((prev) => new Set([...prev, nextServers.length - 1]));
+  }
+
+  function updateServer(i: number, next: McpServerDraft) {
+    setServers((prev) => prev.map((s, idx) => (idx === i ? next : s)));
+  }
+
+  function removeServer(i: number) {
+    setServers((prev) => prev.filter((_, idx) => idx !== i));
+    setExpandedServers((prev) => {
+      const next = new Set<number>();
+      prev.forEach((idx) => { if (idx < i) next.add(idx); else if (idx > i) next.add(idx - 1); });
+      return next;
+    });
+  }
 
   return (
     <div>
       <div className="flex items-center justify-between mb-3">
-        <h3 className="text-sm font-medium">MCP Configuration <span className="text-muted-foreground font-normal">(.claude.json)</span></h3>
+        <h3 className="text-sm font-medium">
+          MCP Servers <span className="text-muted-foreground font-normal text-xs">(.claude.json)</span>
+        </h3>
         {isDirty && (
           <div className="flex items-center gap-2">
-            <Button
-              size="sm"
-              variant="outline"
-              className="h-7 px-2.5 text-xs"
-              onClick={handleCancel}
-              disabled={saveMcp.isPending}
-            >
+            <Button size="sm" variant="outline" className="h-7 px-2.5 text-xs" onClick={handleCancel} disabled={saveMcp.isPending}>
               Cancel
             </Button>
-            <Button
-              size="sm"
-              className="h-7 px-2.5 text-xs"
-              onClick={handleSave}
-              disabled={saveMcp.isPending || !!jsonError}
-            >
+            <Button size="sm" className="h-7 px-2.5 text-xs" onClick={handleSave} disabled={saveMcp.isPending || !!jsonError}>
               {saveMcp.isPending ? "Saving…" : "Save"}
             </Button>
           </div>
         )}
       </div>
-      <div className="space-y-1">
-        {isLoading ? (
-          <p className="text-xs text-muted-foreground">Loading…</p>
-        ) : (
-          <Textarea
-            className="font-mono text-xs min-h-[160px] resize-y"
-            placeholder="{}"
-            value={displayValue}
-            onChange={(e) => handleChange(e.target.value)}
-          />
-        )}
-        {jsonError && (
-          <p className="text-xs text-destructive">{jsonError}</p>
-        )}
-        {saveMcp.isError && (
-          <p className="text-xs text-destructive">
-            {saveMcp.error instanceof Error ? saveMcp.error.message : "Save failed"}
-          </p>
-        )}
-      </div>
+
+      {isLoading ? (
+        <p className="text-xs text-muted-foreground">Loading…</p>
+      ) : (
+        <Tabs value={activeTab} onValueChange={(v) => handleTabChange(v as "servers" | "json")}>
+          <TabsList variant="line" className="mb-3 h-7">
+            <TabsTrigger value="servers" className="text-xs px-2">Servers</TabsTrigger>
+            <TabsTrigger value="json" className="text-xs px-2">JSON</TabsTrigger>
+          </TabsList>
+
+          <TabsContent value="servers">
+            <div className="space-y-2">
+              {servers.map((server, i) => (
+                <McpServerCard
+                  key={i}
+                  server={server}
+                  expanded={expandedServers.has(i)}
+                  onToggleExpand={() =>
+                    setExpandedServers((prev) => {
+                      const next = new Set(prev);
+                      if (next.has(i)) next.delete(i); else next.add(i);
+                      return next;
+                    })
+                  }
+                  onUpdate={(next) => updateServer(i, next)}
+                  onRemove={() => removeServer(i)}
+                />
+              ))}
+              {servers.length === 0 && (
+                <p className="text-xs text-muted-foreground italic py-1">No MCP servers configured.</p>
+              )}
+              <Button size="sm" variant="outline" className="h-7 px-2.5 text-xs gap-1.5" onClick={addServer}>
+                <Plus className="h-3.5 w-3.5" /> Add server
+              </Button>
+            </div>
+          </TabsContent>
+
+          <TabsContent value="json">
+            <div className="space-y-1">
+              <p className="text-[11px] text-muted-foreground mb-1.5">Edit the <code className="font-mono">mcpServers</code> object directly.</p>
+              <Textarea
+                className="font-mono text-xs min-h-[160px] resize-y"
+                value={jsonDraft ?? currentJson}
+                onChange={(e) => handleJsonChange(e.target.value)}
+              />
+              {jsonError && <p className="text-xs text-destructive">{jsonError}</p>}
+            </div>
+          </TabsContent>
+        </Tabs>
+      )}
+
+      {saveMcp.isError && (
+        <p className="text-xs text-destructive mt-1">
+          {saveMcp.error instanceof Error ? saveMcp.error.message : "Save failed"}
+        </p>
+      )}
     </div>
   );
 }
@@ -1449,10 +1639,6 @@ function AgentConfigurePage({
       <InstructionFilesSection agentId={agent.id} companyId={companyId} />
 
       <McpConfigEditor agentId={agent.id} companyId={companyId} />
-
-      {agent.adapterType === "claude_local" && (
-        <ClaudeSlashCommandRunner agentId={agent.id} companyId={companyId} />
-      )}
 
       {/* Configuration Revisions — collapsible at the bottom */}
       <div>

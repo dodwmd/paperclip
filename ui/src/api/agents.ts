@@ -144,21 +144,12 @@ export const agentsApi = {
   ) => api.post<HeartbeatRun | { status: "skipped" }>(agentPath(id, companyId, "/wakeup"), data),
   loginWithClaude: (id: string, companyId?: string) =>
     api.post<ClaudeLoginResult>(agentPath(id, companyId, "/claude-login"), {}),
-  runClaudeSlashCommand: (
-    id: string,
-    slashCommand: string,
-    companyId?: string,
-  ) =>
-    api.post<{ exitCode: number | null; stdout: string; stderr: string; timedOut: boolean }>(
-      agentPath(id, companyId, "/run-claude-slash-command"),
-      { slashCommand },
-    ),
   getInstructionFile: (id: string, filename: string, companyId?: string) =>
     api.get<{ content: string | null }>(agentPath(id, companyId, `/instruction-files/${encodeURIComponent(filename)}`)),
   updateInstructionFile: (id: string, filename: string, content: string, companyId?: string) =>
     api.put<{ ok: true; path: string }>(agentPath(id, companyId, `/instruction-files/${encodeURIComponent(filename)}`), { content }),
   getMcpConfig: (id: string, companyId?: string) =>
-    api.get<{ content: string | null }>(agentPath(id, companyId, "/mcp-config")),
-  updateMcpConfig: (id: string, content: string, companyId?: string) =>
-    api.put<{ ok: true; path: string }>(agentPath(id, companyId, "/mcp-config"), { content }),
+    api.get<{ mcpServers: Record<string, unknown> }>(agentPath(id, companyId, "/mcp-config")),
+  updateMcpConfig: (id: string, mcpServers: Record<string, unknown>, companyId?: string) =>
+    api.put<{ ok: true; path: string }>(agentPath(id, companyId, "/mcp-config"), { mcpServers }),
 };
