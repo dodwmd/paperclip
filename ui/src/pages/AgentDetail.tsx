@@ -1345,7 +1345,7 @@ function McpConfigEditor({ agentId, companyId }: { agentId: string; companyId?: 
   return (
     <div>
       <div className="flex items-center justify-between mb-3">
-        <h3 className="text-sm font-medium">MCP Configuration</h3>
+        <h3 className="text-sm font-medium">MCP Configuration <span className="text-muted-foreground font-normal">(.claude.json)</span></h3>
         {isDirty && (
           <div className="flex items-center gap-2">
             <Button

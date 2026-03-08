@@ -1527,7 +1527,7 @@ export function agentRoutes(db: Db) {
     });
   });
 
-  // ---- MCP config file (.mcp.json in agent workspace dir) ----
+  // ---- MCP config file (.claude.json in agent home dir) ----
 
   router.get("/agents/:id/mcp-config", async (req, res) => {
     const id = await normalizeAgentReference(req, req.params.id as string);
@@ -1538,7 +1538,7 @@ export function agentRoutes(db: Db) {
     }
     await assertCanUpdateAgent(req, existing);
 
-    const mcpPath = path.join(resolveDefaultAgentWorkspaceDir(existing.id), ".mcp.json");
+    const mcpPath = path.join(resolveDefaultAgentHomeDir(existing.id), ".claude.json");
     try {
       const raw = await fs.readFile(mcpPath, "utf-8");
       res.json({ content: raw });
@@ -1574,9 +1574,9 @@ export function agentRoutes(db: Db) {
       return;
     }
 
-    const workspaceDir = resolveDefaultAgentWorkspaceDir(existing.id);
-    await fs.mkdir(workspaceDir, { recursive: true });
-    const mcpPath = path.join(workspaceDir, ".mcp.json");
+    const homeDir = resolveDefaultAgentHomeDir(existing.id);
+    await fs.mkdir(homeDir, { recursive: true });
+    const mcpPath = path.join(homeDir, ".claude.json");
     await fs.writeFile(mcpPath, content, "utf-8");
 
     const actor = getActorInfo(req);
