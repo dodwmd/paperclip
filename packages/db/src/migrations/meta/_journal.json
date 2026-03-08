@@ -190,6 +190,13 @@
       "when": 1772836441586,
       "tag": "0026_noisy_moira_mactaggert",
       "breakpoints": true
+    },
+    {
+      "idx": 27,
+      "version": "7",
+      "when": 1772944468471,
+      "tag": "0027_agent_mcp_servers",
+      "breakpoints": true
     }
   ]
 }

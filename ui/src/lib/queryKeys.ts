@@ -11,7 +11,6 @@ export const queryKeys = {
     taskSessions: (id: string) => ["agents", "task-sessions", id] as const,
     keys: (agentId: string) => ["agents", "keys", agentId] as const,
     configRevisions: (agentId: string) => ["agents", "config-revisions", agentId] as const,
-    mcpConfig: (agentId: string) => ["agents", "mcp-config", agentId] as const,
     instructionFile: (agentId: string, filename: string) => ["agents", "instruction-file", agentId, filename] as const,
     adapterModels: (companyId: string, adapterType: string) =>
       ["agents", companyId, "adapter-models", adapterType] as const,

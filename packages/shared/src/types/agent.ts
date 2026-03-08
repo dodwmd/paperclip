@@ -27,6 +27,7 @@ export interface Agent {
   permissions: AgentPermissions;
   lastHeartbeatAt: Date | null;
   metadata: Record<string, unknown> | null;
+  mcpServers: Record<string, unknown> | null;
   createdAt: Date;
   updatedAt: Date;
 }

@@ -1402,7 +1402,17 @@ function McpServerCard({
   );
 }
 
-function McpConfigEditor({ agentId, companyId }: { agentId: string; companyId?: string }) {
+function McpConfigEditor({
+  agentId,
+  companyId,
+  mcpServers: mcpServersProp,
+  agentUrlKey,
+}: {
+  agentId: string;
+  companyId?: string;
+  mcpServers: Record<string, unknown> | null;
+  agentUrlKey: string;
+}) {
   const queryClient = useQueryClient();
   const [activeTab, setActiveTab] = useState<"servers" | "json">("servers");
   const [servers, setServers] = useState<McpServerDraft[]>([]);
@@ -1410,14 +1420,9 @@ function McpConfigEditor({ agentId, companyId }: { agentId: string; companyId?: 
   const [jsonError, setJsonError] = useState<string | null>(null);
   const [expandedServers, setExpandedServers] = useState<Set<number>>(new Set());
 
-  const { data, isLoading } = useQuery({
-    queryKey: queryKeys.agents.mcpConfig(agentId),
-    queryFn: () => agentsApi.getMcpConfig(agentId, companyId),
-  });
-
   const currentServers = useMemo(
-    () => (data ? mcpServersToSave(apiToServerDrafts(data.mcpServers)) : {}),
-    [data],
+    () => mcpServersToSave(apiToServerDrafts(mcpServersProp ?? {})),
+    [mcpServersProp],
   );
   const currentJson = useMemo(() => JSON.stringify(currentServers, null, 2), [currentServers]);
 
@@ -1426,13 +1431,15 @@ function McpConfigEditor({ agentId, companyId }: { agentId: string; companyId?: 
     setJsonError(null);
     setExpandedServers(new Set());
     setActiveTab("servers");
-    setServers(data ? apiToServerDrafts(data.mcpServers) : []);
-  }, [agentId, data]);
+    setServers(apiToServerDrafts(mcpServersProp ?? {}));
+  }, [agentId, mcpServersProp]);
 
   const saveMcp = useMutation({
-    mutationFn: (mcpServers: Record<string, unknown>) => agentsApi.updateMcpConfig(agentId, mcpServers, companyId),
+    mutationFn: (mcpServers: Record<string, unknown>) =>
+      agentsApi.update(agentId, { mcpServers }, companyId),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: queryKeys.agents.mcpConfig(agentId) });
+      queryClient.invalidateQueries({ queryKey: queryKeys.agents.detail(agentId) });
+      queryClient.invalidateQueries({ queryKey: queryKeys.agents.detail(agentUrlKey) });
     },
   });
 
@@ -1482,7 +1489,7 @@ function McpConfigEditor({ agentId, companyId }: { agentId: string; companyId?: 
     setJsonDraft(null);
     setJsonError(null);
     setActiveTab("servers");
-    setServers(data ? apiToServerDrafts(data.mcpServers) : []);
+    setServers(apiToServerDrafts(mcpServersProp ?? {}));
   }
 
   function addServer() {
@@ -1523,10 +1530,7 @@ function McpConfigEditor({ agentId, companyId }: { agentId: string; companyId?: 
         )}
       </div>
 
-      {isLoading ? (
-        <p className="text-xs text-muted-foreground">Loading…</p>
-      ) : (
-        <Tabs value={activeTab} onValueChange={(v) => handleTabChange(v as "servers" | "json")}>
+      <Tabs value={activeTab} onValueChange={(v) => handleTabChange(v as "servers" | "json")}>
           <TabsList variant="line" className="mb-3 h-7">
             <TabsTrigger value="servers" className="text-xs px-2">Servers</TabsTrigger>
             <TabsTrigger value="json" className="text-xs px-2">JSON</TabsTrigger>
@@ -1571,7 +1575,6 @@ function McpConfigEditor({ agentId, companyId }: { agentId: string; companyId?: 
             </div>
           </TabsContent>
         </Tabs>
-      )}
 
       {saveMcp.isError && (
         <p className="text-xs text-destructive mt-1">
@@ -1638,7 +1641,7 @@ function AgentConfigurePage({
 
       <InstructionFilesSection agentId={agent.id} companyId={companyId} />
 
-      <McpConfigEditor agentId={agent.id} companyId={companyId} />
+      <McpConfigEditor agentId={agent.id} companyId={companyId} mcpServers={agent.mcpServers} agentUrlKey={agent.urlKey} />
 
       {/* Configuration Revisions — collapsible at the bottom */}
       <div>

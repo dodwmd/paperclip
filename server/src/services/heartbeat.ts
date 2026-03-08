@@ -23,7 +23,7 @@ import { createLocalAgentJwt } from "../agent-auth-jwt.js";
 import { parseObject, asBoolean, asNumber, appendWithCap, MAX_EXCERPT_BYTES } from "../adapters/utils.js";
 import { secretService } from "./secrets.js";
 import { resolveDefaultAgentWorkspaceDir, resolveDefaultAgentHomeDir } from "../home-paths.js";
-import { ensureAgentHomeDir } from "../agent-home.js";
+import { ensureAgentHomeDir, writeAgentMcpSettings } from "../agent-home.js";
 
 const MAX_LIVE_LOG_CHUNK_BYTES = 8 * 1024;
 const HEARTBEAT_MAX_CONCURRENT_RUNS_DEFAULT = 1;
@@ -1273,6 +1273,8 @@ export function heartbeatService(db: Db) {
       const agentHomeDir = await ensureAgentHomeDir(agent.id).catch(
         () => resolveDefaultAgentHomeDir(agent.id),
       );
+      // Sync DB-configured MCP servers into the agent's Claude Code settings (best-effort)
+      await writeAgentMcpSettings(agentHomeDir, agent.mcpServers ?? undefined).catch(() => {});
       const resolvedConfigWithHome = {
         ...resolvedConfig,
         env: { HOME: agentHomeDir, ...((resolvedConfig.env as Record<string, unknown>) ?? {}) },

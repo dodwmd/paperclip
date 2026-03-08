@@ -30,7 +30,7 @@ import {
 } from "../services/index.js";
 import { conflict, forbidden, notFound, unprocessable } from "../errors.js";
 import { assertBoard, assertCompanyAccess, getActorInfo } from "./authz.js";
-import { resolveDefaultAgentWorkspaceDir, resolveDefaultAgentHomeDir } from "../home-paths.js";
+import { resolveDefaultAgentHomeDir } from "../home-paths.js";
 import { ensureAgentHomeDir, readInstructionFile, writeInstructionFile, INSTRUCTION_FILES, type InstructionFileName } from "../agent-home.js";
 import { findServerAdapter, listAdapterModels } from "../adapters/index.js";
 import { redactEventPayload } from "../redaction.js";
@@ -1482,78 +1482,6 @@ export function agentRoutes(db: Db) {
       agentName: agent.name,
       adapterType: agent.adapterType,
     });
-  });
-
-  // ---- MCP config (.claude.json in agent home dir) — exposes only mcpServers ----
-
-  router.get("/agents/:id/mcp-config", async (req, res) => {
-    const id = await normalizeAgentReference(req, req.params.id as string);
-    const existing = await svc.getById(id);
-    if (!existing) {
-      res.status(404).json({ error: "Agent not found" });
-      return;
-    }
-    await assertCanUpdateAgent(req, existing);
-
-    const mcpPath = path.join(resolveDefaultAgentHomeDir(existing.id), ".claude.json");
-    try {
-      const raw = await fs.readFile(mcpPath, "utf-8");
-      const parsed = JSON.parse(raw) as Record<string, unknown>;
-      res.json({ mcpServers: (parsed.mcpServers as Record<string, unknown>) ?? {} });
-    } catch (err: unknown) {
-      if ((err as NodeJS.ErrnoException).code === "ENOENT") {
-        res.json({ mcpServers: {} });
-      } else {
-        throw err;
-      }
-    }
-  });
-
-  router.put("/agents/:id/mcp-config", async (req, res) => {
-    const id = await normalizeAgentReference(req, req.params.id as string);
-    const existing = await svc.getById(id);
-    if (!existing) {
-      res.status(404).json({ error: "Agent not found" });
-      return;
-    }
-    await assertCanUpdateAgent(req, existing);
-
-    const { mcpServers } = req.body as { mcpServers?: unknown };
-    if (typeof mcpServers !== "object" || mcpServers === null || Array.isArray(mcpServers)) {
-      res.status(422).json({ error: "mcpServers must be an object" });
-      return;
-    }
-
-    const homeDir = resolveDefaultAgentHomeDir(existing.id);
-    await fs.mkdir(homeDir, { recursive: true });
-    const mcpPath = path.join(homeDir, ".claude.json");
-
-    // Read existing .claude.json to preserve other keys (tokens, theme, etc.)
-    let existing_json: Record<string, unknown> = {};
-    try {
-      const raw = await fs.readFile(mcpPath, "utf-8");
-      existing_json = JSON.parse(raw) as Record<string, unknown>;
-    } catch {
-      // File missing or invalid — start fresh
-    }
-
-    const merged = { ...existing_json, mcpServers };
-    await fs.writeFile(mcpPath, JSON.stringify(merged, null, 2), "utf-8");
-
-    const actor = getActorInfo(req);
-    await logActivity(db, {
-      companyId: existing.companyId,
-      actorType: actor.actorType,
-      actorId: actor.actorId,
-      agentId: actor.agentId,
-      runId: actor.runId,
-      action: "agent.mcp_config_updated",
-      entityType: "agent",
-      entityId: existing.id,
-      details: { path: mcpPath },
-    });
-
-    res.json({ ok: true, path: mcpPath });
   });
 
   // ---- Instruction files (AGENTS.md, HEARTBEAT.md, SOUL.md, TOOLS.md) ----

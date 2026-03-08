@@ -36,6 +36,7 @@ const CONFIG_REVISION_FIELDS = [
   "runtimeConfig",
   "budgetMonthlyCents",
   "metadata",
+  "mcpServers",
 ] as const;
 
 type ConfigRevisionField = (typeof CONFIG_REVISION_FIELDS)[number];
@@ -85,6 +86,10 @@ function buildConfigSnapshot(
     typeof row.metadata === "object" && row.metadata !== null && !Array.isArray(row.metadata)
       ? sanitizeRecord(row.metadata as Record<string, unknown>)
       : row.metadata ?? null;
+  const mcpServers =
+    typeof row.mcpServers === "object" && row.mcpServers !== null && !Array.isArray(row.mcpServers)
+      ? row.mcpServers
+      : row.mcpServers ?? null;
   return {
     name: row.name,
     role: row.role,
@@ -96,6 +101,7 @@ function buildConfigSnapshot(
     runtimeConfig,
     budgetMonthlyCents: row.budgetMonthlyCents,
     metadata,
+    mcpServers,
   };
 }
 

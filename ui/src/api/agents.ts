@@ -148,8 +148,4 @@ export const agentsApi = {
     api.get<{ content: string | null }>(agentPath(id, companyId, `/instruction-files/${encodeURIComponent(filename)}`)),
   updateInstructionFile: (id: string, filename: string, content: string, companyId?: string) =>
     api.put<{ ok: true; path: string }>(agentPath(id, companyId, `/instruction-files/${encodeURIComponent(filename)}`), { content }),
-  getMcpConfig: (id: string, companyId?: string) =>
-    api.get<{ mcpServers: Record<string, unknown> }>(agentPath(id, companyId, "/mcp-config")),
-  updateMcpConfig: (id: string, mcpServers: Record<string, unknown>, companyId?: string) =>
-    api.put<{ ok: true; path: string }>(agentPath(id, companyId, "/mcp-config"), { mcpServers }),
 };
