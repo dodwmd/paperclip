@@ -17,19 +17,29 @@ import {
   useSortable,
   verticalListSortingStrategy,
 } from "@dnd-kit/sortable";
+import { AlertTriangle } from "lucide-react";
 import { StatusIcon } from "./StatusIcon";
 import { PriorityIcon } from "./PriorityIcon";
 import { Identity } from "./Identity";
 import type { Issue } from "@paperclipai/shared";
 
-const boardStatuses = [
-  "backlog",
-  "todo",
-  "in_progress",
-  "in_review",
-  "blocked",
-  "done",
-  "cancelled",
+/* ── Column config ── */
+
+type ColumnConfig = {
+  status: string;
+  wipLimit?: number;         // global item count limit
+  wipPerAssignee?: number;   // per-assignee limit
+};
+
+const BOARD_COLUMNS: ColumnConfig[] = [
+  { status: "backlog" },
+  { status: "todo" },
+  { status: "ready", wipLimit: 10 },
+  { status: "in_progress", wipPerAssignee: 2 },
+  { status: "in_review", wipLimit: 4 },
+  { status: "qa", wipLimit: 4 },
+  { status: "deploy" },
+  { status: "done" },
 ];
 
 function statusLabel(status: string): string {
@@ -51,17 +61,44 @@ interface KanbanBoardProps {
 /* ── Droppable Column ── */
 
 function KanbanColumn({
-  status,
+  config,
   issues,
   agents,
   liveIssueIds,
 }: {
-  status: string;
+  config: ColumnConfig;
   issues: Issue[];
   agents?: Agent[];
   liveIssueIds?: Set<string>;
 }) {
+  const { status, wipLimit, wipPerAssignee } = config;
   const { setNodeRef, isOver } = useDroppable({ id: status });
+
+  // Global WIP check
+  const isOverGlobalLimit = wipLimit != null && issues.length > wipLimit;
+
+  // Per-assignee WIP check
+  const overLimitAssignees = useMemo<Set<string>>(() => {
+    if (!wipPerAssignee) return new Set();
+    const counts: Record<string, number> = {};
+    for (const issue of issues) {
+      if (issue.assigneeAgentId) {
+        counts[issue.assigneeAgentId] = (counts[issue.assigneeAgentId] ?? 0) + 1;
+      }
+    }
+    return new Set(
+      Object.entries(counts)
+        .filter(([, count]) => count > wipPerAssignee)
+        .map(([id]) => id)
+    );
+  }, [issues, wipPerAssignee]);
+
+  const isOverPerAssignee = overLimitAssignees.size > 0;
+  const isOverLimit = isOverGlobalLimit || isOverPerAssignee;
+
+  const countDisplay = wipLimit != null
+    ? `${issues.length} / ${wipLimit}`
+    : `${issues.length}`;
 
   return (
     <div className="flex flex-col min-w-[260px] w-[260px] shrink-0">
@@ -70,14 +107,25 @@ function KanbanColumn({
         <span className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
           {statusLabel(status)}
         </span>
-        <span className="text-xs text-muted-foreground/60 ml-auto tabular-nums">
-          {issues.length}
+        <span
+          className={`text-xs ml-auto tabular-nums font-medium ${
+            isOverLimit ? "text-red-500 dark:text-red-400" : "text-muted-foreground/60"
+          }`}
+        >
+          {countDisplay}
         </span>
+        {isOverLimit && (
+          <AlertTriangle className="h-3 w-3 text-red-500 dark:text-red-400 shrink-0" />
+        )}
       </div>
       <div
         ref={setNodeRef}
         className={`flex-1 min-h-[120px] rounded-md p-1 space-y-1 transition-colors ${
-          isOver ? "bg-accent/40" : "bg-muted/20"
+          isOver
+            ? "bg-accent/40"
+            : isOverLimit
+              ? "bg-red-500/10 border border-red-500/20"
+              : "bg-muted/20"
         }`}
       >
         <SortableContext
@@ -90,6 +138,11 @@ function KanbanColumn({
               issue={issue}
               agents={agents}
               isLive={liveIssueIds?.has(issue.id)}
+              isWipViolating={
+                issue.assigneeAgentId
+                  ? overLimitAssignees.has(issue.assigneeAgentId)
+                  : false
+              }
             />
           ))}
         </SortableContext>
@@ -105,11 +158,13 @@ function KanbanCard({
   agents,
   isLive,
   isOverlay,
+  isWipViolating,
 }: {
   issue: Issue;
   agents?: Agent[];
   isLive?: boolean;
   isOverlay?: boolean;
+  isWipViolating?: boolean;
 }) {
   const {
     attributes,
@@ -138,7 +193,9 @@ function KanbanCard({
       {...listeners}
       className={`rounded-md border bg-card p-2.5 cursor-grab active:cursor-grabbing transition-shadow ${
         isDragging && !isOverlay ? "opacity-30" : ""
-      } ${isOverlay ? "shadow-lg ring-1 ring-primary/20" : "hover:shadow-sm"}`}
+      } ${isOverlay ? "shadow-lg ring-1 ring-primary/20" : "hover:shadow-sm"} ${
+        isWipViolating ? "border-l-2 border-l-amber-500" : ""
+      }`}
     >
       <Link
         to={`/issues/${issue.identifier ?? issue.id}`}
@@ -157,6 +214,9 @@ function KanbanCard({
               <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-blue-400 opacity-75" />
               <span className="relative inline-flex rounded-full h-2 w-2 bg-blue-500" />
             </span>
+          )}
+          {isWipViolating && (
+            <AlertTriangle className="h-3 w-3 text-amber-500 shrink-0 mt-0.5 ml-auto" />
           )}
         </div>
         <p className="text-sm leading-snug line-clamp-2 mb-2">{issue.title}</p>
@@ -194,8 +254,8 @@ export function KanbanBoard({
 
   const columnIssues = useMemo(() => {
     const grouped: Record<string, Issue[]> = {};
-    for (const status of boardStatuses) {
-      grouped[status] = [];
+    for (const col of BOARD_COLUMNS) {
+      grouped[col.status] = [];
     }
     for (const issue of issues) {
       if (grouped[issue.status]) {
@@ -223,14 +283,13 @@ export function KanbanBoard({
     const issue = issues.find((i) => i.id === issueId);
     if (!issue) return;
 
-    // Determine target status: the "over" could be a column id (status string)
-    // or another card's id. Find which column the "over" belongs to.
+    // Determine target status: "over" could be a column id (status string) or a card id
     let targetStatus: string | null = null;
 
-    if (boardStatuses.includes(over.id as string)) {
+    if (BOARD_COLUMNS.some((c) => c.status === over.id)) {
       targetStatus = over.id as string;
     } else {
-      // It's a card - find which column it's in
+      // It's a card — find which column it's in
       const targetIssue = issues.find((i) => i.id === over.id);
       if (targetIssue) {
         targetStatus = targetIssue.status;
@@ -254,11 +313,11 @@ export function KanbanBoard({
       onDragEnd={handleDragEnd}
     >
       <div className="flex gap-3 overflow-x-auto pb-4 -mx-2 px-2">
-        {boardStatuses.map((status) => (
+        {BOARD_COLUMNS.map((col) => (
           <KanbanColumn
-            key={status}
-            status={status}
-            issues={columnIssues[status] ?? []}
+            key={col.status}
+            config={col}
+            issues={columnIssues[col.status] ?? []}
             agents={agents}
             liveIssueIds={liveIssueIds}
           />

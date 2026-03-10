@@ -110,8 +110,11 @@ export type AgentIconName = (typeof AGENT_ICON_NAMES)[number];
 export const ISSUE_STATUSES = [
   "backlog",
   "todo",
+  "ready",
   "in_progress",
   "in_review",
+  "qa",
+  "deploy",
   "done",
   "blocked",
   "cancelled",
