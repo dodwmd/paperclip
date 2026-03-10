@@ -10,23 +10,30 @@
  * Usage: node scripts/apply-publish-config.mjs
  */
 
-import { readFileSync, writeFileSync } from "node:fs";
-import { resolve, dirname } from "node:path";
+import { readFileSync, writeFileSync, readdirSync, statSync } from "node:fs";
+import { resolve, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const root = resolve(__dirname, "..");
 
-const workspacePackages = [
-  "packages/shared",
-  "packages/db",
-  "packages/adapter-utils",
-  "packages/adapters/claude-local",
-  "packages/adapters/codex-local",
-  "packages/adapters/cursor-local",
-  "packages/adapters/opencode-local",
-  "packages/adapters/openclaw",
-];
+// Discover all workspace packages that contain a package.json (no hardcoded list)
+function findPackageDirs(dir, depth = 3) {
+  const results = [];
+  if (depth === 0) return results;
+  for (const entry of readdirSync(dir, { withFileTypes: true })) {
+    if (!entry.isDirectory() || entry.name === "node_modules" || entry.name.startsWith(".")) continue;
+    const full = join(dir, entry.name);
+    const pkgJson = join(full, "package.json");
+    try { statSync(pkgJson); results.push(full); } catch { /* no package.json */ }
+    results.push(...findPackageDirs(full, depth - 1));
+  }
+  return results;
+}
+
+const workspacePackages = findPackageDirs(resolve(root, "packages"))
+  .map((p) => p.replace(root + "/", ""))
+  .sort();
 
 for (const pkgDir of workspacePackages) {
   const pkgPath = resolve(root, pkgDir, "package.json");
