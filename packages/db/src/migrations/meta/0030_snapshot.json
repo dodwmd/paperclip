@@ -1,6 +1,6 @@
 {
-  "id": "d4e5f6a7-b8c9-0123-defa-123456789012",
-  "prevId": "8186209d-f7ec-4048-bd4f-c96530f45304",
+  "id": "8186209d-f7ec-4048-bd4f-c96530f45304",
+  "prevId": "5f8dd541-9e28-4a42-890b-fc4a301604ac",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -4675,13 +4675,6 @@
           "primaryKey": false,
           "notNull": true,
           "default": "now()"
-        },
-        "pr_url": {
-          "name": "pr_url",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
         }
       },
       "indexes": {
