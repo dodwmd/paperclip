@@ -271,6 +271,10 @@ export function CommentThread({
       .map((a) => ({
         id: a.id,
         name: a.name,
+        // Use the agent's role as the @-handle so the backend regex can resolve it.
+        // Agent names often contain spaces (e.g. "Product Owner") which the regex
+        // /\B@([^\s@,!?.]+)/g cannot capture past the first space.
+        mention: a.role ?? undefined,
       }));
   }, [agentMap, providedMentions]);
 

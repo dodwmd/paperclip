@@ -17,11 +17,13 @@ import {
   useSortable,
   verticalListSortingStrategy,
 } from "@dnd-kit/sortable";
-import { AlertTriangle } from "lucide-react";
+import { AlertTriangle, ChevronDown, ChevronUp } from "lucide-react";
 import { StatusIcon } from "./StatusIcon";
 import { PriorityIcon } from "./PriorityIcon";
 import { Identity } from "./Identity";
 import type { Issue } from "@paperclipai/shared";
+import { AGENT_ROLE_LABELS, DEFAULT_TRANSITION_RULES } from "@paperclipai/shared";
+import { useToast } from "../context/ToastContext";
 
 /* ── Column config ── */
 
@@ -40,7 +42,13 @@ const BOARD_COLUMNS: ColumnConfig[] = [
   { status: "qa", wipLimit: 4 },
   { status: "deploy" },
   { status: "done" },
+  { status: "blocked" },
+  { status: "cancelled" },
 ];
+
+/** Statuses that get truncated to COLUMN_TRUNCATE_LIMIT when not filtered */
+const TRUNCATED_STATUSES = new Set(["done", "cancelled"]);
+const COLUMN_TRUNCATE_LIMIT = 5;
 
 function statusLabel(status: string): string {
   return status.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
@@ -49,6 +57,7 @@ function statusLabel(status: string): string {
 interface Agent {
   id: string;
   name: string;
+  role?: string;
 }
 
 interface KanbanBoardProps {
@@ -56,6 +65,8 @@ interface KanbanBoardProps {
   agents?: Agent[];
   liveIssueIds?: Set<string>;
   onUpdateIssue: (id: string, data: Record<string, unknown>) => void;
+  /** When true (search/filters active), disables done/cancelled truncation */
+  isFiltered?: boolean;
 }
 
 /* ── Droppable Column ── */
@@ -65,14 +76,17 @@ function KanbanColumn({
   issues,
   agents,
   liveIssueIds,
+  isFiltered,
 }: {
   config: ColumnConfig;
   issues: Issue[];
   agents?: Agent[];
   liveIssueIds?: Set<string>;
+  isFiltered?: boolean;
 }) {
   const { status, wipLimit, wipPerAssignee } = config;
   const { setNodeRef, isOver } = useDroppable({ id: status });
+  const [showAll, setShowAll] = useState(false);
 
   // Global WIP check
   const isOverGlobalLimit = wipLimit != null && issues.length > wipLimit;
@@ -100,8 +114,39 @@ function KanbanColumn({
     ? `${issues.length} / ${wipLimit}`
     : `${issues.length}`;
 
+  // Truncation: only for done/cancelled when no search/filter is active
+  const canTruncate = TRUNCATED_STATUSES.has(status) && !isFiltered;
+  const isTruncated = canTruncate && !showAll && issues.length > COLUMN_TRUNCATE_LIMIT;
+  const displayedIssues = isTruncated ? issues.slice(0, COLUMN_TRUNCATE_LIMIT) : issues;
+  const hiddenCount = isTruncated ? issues.length - COLUMN_TRUNCATE_LIMIT : 0;
+
+  // Empty column: render as a compact narrow strip, still droppable
+  if (issues.length === 0) {
+    return (
+      <div
+        ref={setNodeRef}
+        className={`flex flex-col items-center min-w-[56px] w-[56px] shrink-0 rounded-md transition-colors ${
+          isOver
+            ? "bg-accent/50 border-2 border-accent/60 min-h-[160px]"
+            : "bg-muted/10 border border-dashed border-border/40 min-h-[120px]"
+        }`}
+      >
+        <div className="flex flex-col items-center gap-1.5 p-2 pt-3">
+          <StatusIcon status={status} />
+          <span
+            className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground/40 my-1.5"
+            style={{ writingMode: "vertical-rl", transform: "rotate(180deg)" }}
+          >
+            {statusLabel(status)}
+          </span>
+          <span className="text-[10px] text-muted-foreground/30 tabular-nums">0</span>
+        </div>
+      </div>
+    );
+  }
+
   return (
-    <div className="flex flex-col min-w-[260px] w-[260px] shrink-0">
+    <div className="flex flex-col min-w-[240px] w-[240px] shrink-0">
       <div className="flex items-center gap-2 px-2 py-2 mb-1">
         <StatusIcon status={status} />
         <span className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
@@ -118,6 +163,18 @@ function KanbanColumn({
           <AlertTriangle className="h-3 w-3 text-red-500 dark:text-red-400 shrink-0" />
         )}
       </div>
+
+      {/* Expand control for truncated columns */}
+      {hiddenCount > 0 && (
+        <button
+          onClick={() => setShowAll(true)}
+          className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground mb-1 px-2 py-1 hover:bg-accent/30 rounded transition-colors"
+        >
+          <ChevronDown className="h-3 w-3 shrink-0" />
+          +{hiddenCount} older issues
+        </button>
+      )}
+
       <div
         ref={setNodeRef}
         className={`flex-1 min-h-[120px] rounded-md p-1 space-y-1 transition-colors ${
@@ -129,10 +186,10 @@ function KanbanColumn({
         }`}
       >
         <SortableContext
-          items={issues.map((i) => i.id)}
+          items={displayedIssues.map((i) => i.id)}
           strategy={verticalListSortingStrategy}
         >
-          {issues.map((issue) => (
+          {displayedIssues.map((issue) => (
             <KanbanCard
               key={issue.id}
               issue={issue}
@@ -147,6 +204,17 @@ function KanbanColumn({
           ))}
         </SortableContext>
       </div>
+
+      {/* Collapse control when expanded */}
+      {showAll && canTruncate && issues.length > COLUMN_TRUNCATE_LIMIT && (
+        <button
+          onClick={() => setShowAll(false)}
+          className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground mt-1 px-2 py-1 hover:bg-accent/30 rounded transition-colors"
+        >
+          <ChevronUp className="h-3 w-3 shrink-0" />
+          Show less
+        </button>
+      )}
     </div>
   );
 }
@@ -183,6 +251,12 @@ function KanbanCard({
   const agentName = (id: string | null) => {
     if (!id || !agents) return null;
     return agents.find((a) => a.id === id)?.name ?? null;
+  };
+
+  const agentRole = (id: string | null) => {
+    if (!id || !agents) return null;
+    const agent = agents.find((a) => a.id === id);
+    return agent?.role ?? null;
   };
 
   return (
@@ -224,8 +298,19 @@ function KanbanCard({
           <PriorityIcon priority={issue.priority} />
           {issue.assigneeAgentId && (() => {
             const name = agentName(issue.assigneeAgentId);
+            const role = agentRole(issue.assigneeAgentId);
+            const roleLabel = role && role in AGENT_ROLE_LABELS
+              ? AGENT_ROLE_LABELS[role as keyof typeof AGENT_ROLE_LABELS]
+              : null;
             return name ? (
-              <Identity name={name} size="xs" />
+              <div className="flex items-center gap-1">
+                <Identity name={name} size="xs" />
+                {roleLabel && (
+                  <span className="text-[10px] text-muted-foreground bg-muted px-1 rounded">
+                    {roleLabel}
+                  </span>
+                )}
+              </div>
             ) : (
               <span className="text-xs text-muted-foreground font-mono">
                 {issue.assigneeAgentId.slice(0, 8)}
@@ -245,8 +330,10 @@ export function KanbanBoard({
   agents,
   liveIssueIds,
   onUpdateIssue,
+  isFiltered,
 }: KanbanBoardProps) {
   const [activeId, setActiveId] = useState<string | null>(null);
+  const { pushToast } = useToast();
 
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 5 } })
@@ -296,6 +383,23 @@ export function KanbanBoard({
       }
     }
 
+    // Client-side transition guard: check if this transition is defined in the
+    // shared policy rules. This is purely advisory UI feedback; server enforces.
+    if (targetStatus && targetStatus !== issue.status) {
+      const isDefined = DEFAULT_TRANSITION_RULES.some(
+        (r) => r.from === issue.status && r.to === targetStatus
+      );
+      if (!isDefined) {
+        // Transition is not defined in the policy — show visible user feedback
+        pushToast({
+          title: "Transition not allowed",
+          body: `Moving from '${issue.status}' to '${targetStatus}' is not a valid workflow transition.`,
+          tone: "warn",
+        });
+        return;
+      }
+    }
+
     if (targetStatus && targetStatus !== issue.status) {
       onUpdateIssue(issueId, { status: targetStatus });
     }
@@ -312,7 +416,7 @@ export function KanbanBoard({
       onDragOver={handleDragOver}
       onDragEnd={handleDragEnd}
     >
-      <div className="flex gap-3 overflow-x-auto pb-4 -mx-2 px-2">
+      <div className="flex gap-3 overflow-x-auto pb-4 -mx-2 px-2 items-start">
         {BOARD_COLUMNS.map((col) => (
           <KanbanColumn
             key={col.status}
@@ -320,6 +424,7 @@ export function KanbanBoard({
             issues={columnIssues[col.status] ?? []}
             agents={agents}
             liveIssueIds={liveIssueIds}
+            isFiltered={isFiltered}
           />
         ))}
       </div>

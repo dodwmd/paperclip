@@ -33,9 +33,28 @@ export const createIssueLabelSchema = z.object({
 
 export type CreateIssueLabel = z.infer<typeof createIssueLabelSchema>;
 
+export const prUrlSchema = z
+  .string()
+  .min(1, { message: "PR URL must not be empty" })
+  .url({ message: "prUrl must be a valid HTTP/HTTPS URL (e.g. https://github.com/org/repo/pull/1)" })
+  .refine(
+    (url) => {
+      try {
+        const parsed = new URL(url);
+        return parsed.protocol === "https:" || parsed.protocol === "http:";
+      } catch {
+        return false;
+      }
+    },
+    { message: "prUrl must use http or https" },
+  )
+  .optional()
+  .nullable();
+
 export const updateIssueSchema = createIssueSchema.partial().extend({
   comment: z.string().min(1).optional(),
   hiddenAt: z.string().datetime().nullable().optional(),
+  prUrl: prUrlSchema,
 });
 
 export type UpdateIssue = z.infer<typeof updateIssueSchema>;

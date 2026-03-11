@@ -112,6 +112,7 @@ import {
   AvatarGroup,
   AvatarGroupCount,
 } from "@/components/ui/avatar";
+import { ISSUE_STATUSES } from "@paperclipai/shared";
 import { StatusBadge } from "@/components/StatusBadge";
 import { StatusIcon } from "@/components/StatusIcon";
 import { PriorityIcon } from "@/components/PriorityIcon";
@@ -409,7 +410,7 @@ export function DesignGuide() {
 
         <SubSection title="StatusIcon (interactive)">
           <div className="flex items-center gap-3 flex-wrap">
-            {["backlog", "todo", "in_progress", "in_review", "done", "cancelled", "blocked"].map(
+            {[...ISSUE_STATUSES].map(
               (s) => (
                 <div key={s} className="flex items-center gap-1.5">
                   <StatusIcon status={s} />

@@ -156,6 +156,7 @@ export {
   type UpdateProject,
   type CreateProjectWorkspace,
   type UpdateProjectWorkspace,
+  prUrlSchema,
   createIssueSchema,
   createIssueLabelSchema,
   updateIssueSchema,
@@ -231,7 +232,18 @@ export {
   type CompanyPortabilityImport,
 } from "./validators/index.js";
 
-export { API_PREFIX, API } from "./api.js";
+export { API_PREFIX, API, issueWorkflowPath } from "./api.js";
+export {
+  DEFAULT_TRANSITION_RULES,
+  WIP_LIMITS,
+  checkTransitionPolicy,
+  checkWipPolicy,
+  type TransitionRule,
+  type TransitionCheckResult,
+  type TransitionDeniedReason,
+  type TransitionActor,
+  type ActorKind,
+} from "./kanban-policy.js";
 export { normalizeAgentUrlKey, deriveAgentUrlKey, isUuidLike } from "./agent-url-key.js";
 export { deriveProjectUrlKey, normalizeProjectUrlKey } from "./project-url-key.js";
 export {

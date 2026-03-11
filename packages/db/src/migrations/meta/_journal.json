@@ -197,6 +197,13 @@
       "when": 1772944468471,
       "tag": "0027_agent_mcp_servers",
       "breakpoints": true
+    },
+    {
+      "idx": 28,
+      "version": "7",
+      "when": 1741651200000,
+      "tag": "0028_kanban_pr_url",
+      "breakpoints": true
     }
   ]
 }

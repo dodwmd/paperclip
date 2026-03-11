@@ -21,6 +21,11 @@ import {
   issueService,
   logActivity,
   projectService,
+  checkTransitionPolicy,
+  checkWipPolicy,
+  WIP_LIMITS,
+  DEFAULT_TRANSITION_RULES,
+  type TransitionActor,
 } from "../services/index.js";
 import { logger } from "../middleware/logger.js";
 import { forbidden, HttpError, unauthorized } from "../errors.js";
@@ -162,6 +167,88 @@ export function issueRoutes(db: Db, storage: StorageService) {
       }
     }
     return rawId;
+  }
+
+  /**
+   * Resolve the role of the requesting actor.
+   * Board actors return null (they bypass role checks unconditionally).
+   * Agent actors return the role from DB, or null if agent is not found.
+   * A null role maps to "general" in the policy engine (denied by all transitions).
+   */
+  async function resolveActorRole(req: Request): Promise<string | null> {
+    if (req.actor.type === "board") return null;
+    if (!req.actor.agentId) return null;
+    const agent = await agentsSvc.getById(req.actor.agentId);
+    return agent?.role ?? null;
+  }
+
+  /**
+   * Assert that WIP limits are not exceeded for the target status.
+   * Logs a denial event and throws 409 if the limit is exceeded.
+   *
+   * NOTE: This is advisory enforcement — two concurrent requests can both
+   * pass the count check before either commits. Strict enforcement would
+   * require SELECT ... FOR UPDATE inside the transaction.
+   */
+  async function assertWipNotExceeded(
+    req: Request,
+    companyId: string,
+    toStatus: string,
+    assigneeAgentId: string | null,
+    issueId: string,
+    actorRole: string | null,
+  ) {
+    const [globalCount, assigneeCount] = await Promise.all([
+      svc.countByStatus(companyId, toStatus),
+      assigneeAgentId ? svc.countByStatusAndAssignee(companyId, toStatus, assigneeAgentId) : Promise.resolve(0),
+    ]);
+
+    // Import IssueStatus-typed value from constants
+    const wipResult = checkWipPolicy(
+      toStatus as Parameters<typeof checkWipPolicy>[0],
+      globalCount,
+      assigneeAgentId,
+      assigneeCount,
+    );
+
+    if (!wipResult.allowed) {
+      const actor = getActorInfo(req);
+      // Log BEFORE throwing (requirement from QA5)
+      await logActivity(db, {
+        companyId,
+        actorType: actor.actorType,
+        actorId: actor.actorId,
+        agentId: actor.agentId,
+        runId: actor.runId,
+        action: "issue.wip_exceeded",
+        entityType: "issue",
+        entityId: issueId,
+        details: {
+          status: toStatus,
+          globalCount,
+          assigneeCount,
+          assigneeAgentId,
+          actorRole,
+          detail: wipResult.detail,
+        },
+      });
+      throw new HttpError(409, wipResult.detail ?? "WIP limit exceeded", {
+        code: wipResult.reason,
+        status: toStatus,
+      });
+    }
+  }
+
+  /**
+   * Determine whether Kanban enforcement is active for this request.
+   * Enforcement is active when KANBAN_ENFORCEMENT_ENABLED is not "false".
+   *
+   * NOTE: local_implicit board actors are no longer exempt. Enforcement runs
+   * in all modes so that workflow rules are validated during local development.
+   * To disable enforcement in dev, set KANBAN_ENFORCEMENT_ENABLED=false.
+   */
+  function isEnforcementActive(_req: Request): boolean {
+    return process.env.KANBAN_ENFORCEMENT_ENABLED !== "false";
   }
 
   // Resolve issue identifiers (e.g. "PAP-39") to UUIDs for all /issues/:id routes
@@ -308,6 +395,59 @@ export function issueRoutes(db: Db, storage: StorageService) {
       ? await projectsSvc.listByIds(issue.companyId, mentionedProjectIds)
       : [];
     res.json({ ...issue, ancestors, project: project ?? null, goal: goal ?? null, mentionedProjects });
+  });
+
+  /**
+   * GET /issues/:id/workflow
+   *
+   * Returns the set of allowed transitions for the calling actor given the
+   * issue's current status. Used by agents and UI to determine valid moves.
+   *
+   * Does NOT return wipLimits (those are compile-time constants available
+   * in @paperclipai/shared) to avoid leaking operational config.
+   */
+  router.get("/issues/:id/workflow", async (req, res) => {
+    const id = req.params.id as string;
+    const issue = await svc.getById(id);
+    if (!issue) {
+      res.status(404).json({ error: "Issue not found" });
+      return;
+    }
+    assertCompanyAccess(req, issue.companyId);
+
+    const actorRole = await resolveActorRole(req);
+    const policyActor: TransitionActor = {
+      kind: req.actor.type === "board" ? "board" : "agent",
+      role: actorRole,
+    };
+    const issueRecord = issue as Record<string, unknown>;
+    const currentPrUrl = (issueRecord.prUrl as string | null) ?? null;
+    const currentStatus = issue.status as Parameters<typeof checkTransitionPolicy>[0];
+
+    // Compute allowed transitions for this actor
+    const allowedTransitions = DEFAULT_TRANSITION_RULES
+      .filter((rule) => rule.from === currentStatus)
+      .map((rule) => {
+        const result = checkTransitionPolicy(
+          currentStatus,
+          rule.to,
+          policyActor,
+          { prUrl: currentPrUrl },
+        );
+        return {
+          to: rule.to,
+          allowed: result.allowed,
+          reason: result.reason,
+          detail: result.detail,
+          requiredFields: rule.requiredFields ?? [],
+        };
+      });
+
+    res.json({
+      current: currentStatus,
+      prUrl: currentPrUrl,
+      transitions: allowedTransitions,
+    });
   });
 
   router.post("/issues/:id/read", async (req, res) => {
@@ -488,6 +628,94 @@ export function issueRoutes(db: Db, storage: StorageService) {
     if (hiddenAtRaw !== undefined) {
       updateFields.hiddenAt = hiddenAtRaw ? new Date(hiddenAtRaw) : null;
     }
+
+    // ── Kanban Workflow Enforcement ──────────────────────────────────────
+    // Policy check must run before svc.update() to preserve atomic
+    // reject-on-invalid-transition semantics.
+    // Idempotency: if status is unchanged (from === to), policy and WIP checks
+    // are skipped. PATCH status transitions are safe to retry on network timeout.
+    const statusChanging = updateFields.status !== undefined && updateFields.status !== existing.status;
+    if (isEnforcementActive(req) && statusChanging) {
+      const actorRole = await resolveActorRole(req);
+      const policyActor: TransitionActor = {
+        kind: req.actor.type === "board" ? "board" : "agent",
+        role: actorRole,
+      };
+      const effectivePrUrl =
+        updateFields.prUrl !== undefined
+          ? (updateFields.prUrl as string | null)
+          : (existing as Record<string, unknown>).prUrl as string | null ?? null;
+
+      const from = existing.status as Parameters<typeof checkTransitionPolicy>[0];
+      const to = updateFields.status as Parameters<typeof checkTransitionPolicy>[1];
+
+      const transitionResult = checkTransitionPolicy(from, to, policyActor, { prUrl: effectivePrUrl });
+      if (!transitionResult.allowed) {
+        const actor = getActorInfo(req);
+        await logActivity(db, {
+          companyId: existing.companyId,
+          actorType: actor.actorType,
+          actorId: actor.actorId,
+          agentId: actor.agentId,
+          runId: actor.runId,
+          action: "issue.transition_denied",
+          entityType: "issue",
+          entityId: existing.id,
+          details: {
+            from,
+            to,
+            reason: transitionResult.reason,
+            detail: transitionResult.detail,
+            actorRole,
+            identifier: existing.identifier,
+          },
+        });
+        throw new HttpError(422, transitionResult.detail ?? "Transition not allowed", {
+          code: transitionResult.reason,
+          from,
+          to,
+        });
+      }
+
+      // WIP enforcement
+      const nextAssigneeId =
+        updateFields.assigneeAgentId !== undefined
+          ? (updateFields.assigneeAgentId as string | null)
+          : existing.assigneeAgentId;
+      await assertWipNotExceeded(req, existing.companyId, to, nextAssigneeId, existing.id, actorRole);
+
+      // Review-rejection wakeup: if status goes back to in_progress from review/qa/deploy
+      // and assignee is unchanged, wake the assignee with reason "issue_review_rejected"
+      const rejectionSources = new Set(["in_review", "qa", "deploy"]);
+      if (
+        to === "in_progress" &&
+        rejectionSources.has(from) &&
+        updateFields.assigneeAgentId === undefined &&
+        existing.assigneeAgentId
+      ) {
+        const actor = getActorInfo(req);
+        void heartbeat
+          .wakeup(existing.assigneeAgentId, {
+            source: "automation",
+            triggerDetail: "system",
+            reason: "issue_review_rejected",
+            payload: { issueId: existing.id, from, to },
+            requestedByActorType: actor.actorType,
+            requestedByActorId: actor.actorId,
+            contextSnapshot: {
+              issueId: existing.id,
+              source: "issue.review_rejected",
+              wakeReason: "issue_review_rejected",
+              rejectedFrom: from,
+            },
+          })
+          .catch((err) =>
+            logger.warn({ err, issueId: existing.id }, "failed to wake assignee on review rejection"),
+          );
+      }
+    }
+    // ── End Kanban Workflow Enforcement ──────────────────────────────────
+
     let issue;
     try {
       issue = await svc.update(id, updateFields);
@@ -701,6 +929,19 @@ export function issueRoutes(db: Db, storage: StorageService) {
       return;
     }
 
+    // Checkout role capability check (not transition-state check, to avoid TOCTOU).
+    // Only checks whether this role CAN EVER check out issues, not the current state.
+    if (isEnforcementActive(req) && req.actor.type === "agent") {
+      const actorRole = await resolveActorRole(req);
+      const checkoutCapableRoles = ["engineer", "cto"];
+      if (!checkoutCapableRoles.includes(actorRole ?? "")) {
+        throw new HttpError(422, `Role '${actorRole ?? "general"}' cannot check out issues`, {
+          code: "forbidden_role",
+          role: actorRole,
+        });
+      }
+    }
+
     const checkoutRunId = requireAgentRunId(req, res);
     if (req.actor.type === "agent" && !checkoutRunId) return;
     const updated = await svc.checkout(id, req.body.agentId, req.body.expectedStatuses, checkoutRunId);
@@ -828,6 +1069,44 @@ export function issueRoutes(db: Db, storage: StorageService) {
     let currentIssue = issue;
 
     if (reopenRequested && isClosed) {
+      // Apply transition policy for reopen (done/cancelled → todo is pm/board only)
+      if (isEnforcementActive(req)) {
+        const actorRole = await resolveActorRole(req);
+        const policyActor: TransitionActor = {
+          kind: req.actor.type === "board" ? "board" : "agent",
+          role: actorRole,
+        };
+        const fromStatus = issue.status as Parameters<typeof checkTransitionPolicy>[0];
+        const reopenResult = checkTransitionPolicy(fromStatus, "todo", policyActor, {});
+        if (!reopenResult.allowed) {
+          const actor = getActorInfo(req);
+          await logActivity(db, {
+            companyId: issue.companyId,
+            actorType: actor.actorType,
+            actorId: actor.actorId,
+            agentId: actor.agentId,
+            runId: actor.runId,
+            action: "issue.transition_denied",
+            entityType: "issue",
+            entityId: issue.id,
+            details: {
+              from: fromStatus,
+              to: "todo",
+              reason: reopenResult.reason,
+              detail: reopenResult.detail,
+              actorRole,
+              identifier: issue.identifier,
+              source: "comment.reopen",
+            },
+          });
+          throw new HttpError(422, reopenResult.detail ?? "Transition not allowed", {
+            code: reopenResult.reason,
+            from: fromStatus,
+            to: "todo",
+          });
+        }
+      }
+
       const reopenedIssue = await svc.update(id, { status: "todo" });
       if (!reopenedIssue) {
         res.status(404).json({ error: "Issue not found" });

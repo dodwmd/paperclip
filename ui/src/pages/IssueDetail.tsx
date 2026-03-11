@@ -10,6 +10,7 @@ import { projectsApi } from "../api/projects";
 import { useCompany } from "../context/CompanyContext";
 import { usePanel } from "../context/PanelContext";
 import { useBreadcrumbs } from "../context/BreadcrumbContext";
+import { useToast } from "../context/ToastContext";
 import { queryKeys } from "../lib/queryKeys";
 import { useProjectOrder } from "../hooks/useProjectOrder";
 import { relativeTime, cn, formatTokens } from "../lib/utils";
@@ -159,6 +160,7 @@ export function IssueDetail() {
   });
   const [attachmentError, setAttachmentError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const { pushToast } = useToast();
   const lastMarkedReadIssueIdRef = useRef<string | null>(null);
 
   const { data: issue, isLoading, error } = useQuery({
@@ -403,6 +405,11 @@ export function IssueDetail() {
   const updateIssue = useMutation({
     mutationFn: (data: Record<string, unknown>) => issuesApi.update(issueId!, data),
     onSuccess: () => {
+      invalidateIssue();
+    },
+    onError: (err) => {
+      const message = err instanceof Error ? err.message : "Failed to update issue";
+      pushToast({ title: "Update failed", body: message, tone: "error" });
       invalidateIssue();
     },
   });

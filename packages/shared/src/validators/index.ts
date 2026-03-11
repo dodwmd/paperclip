@@ -56,6 +56,7 @@ export {
 } from "./project.js";
 
 export {
+  prUrlSchema,
   createIssueSchema,
   createIssueLabelSchema,
   updateIssueSchema,

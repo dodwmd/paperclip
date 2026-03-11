@@ -109,6 +109,7 @@ export function IssueProperties({ issue, onUpdate, inline }: IssuePropertiesProp
   const [labelSearch, setLabelSearch] = useState("");
   const [newLabelName, setNewLabelName] = useState("");
   const [newLabelColor, setNewLabelColor] = useState("#6366f1");
+  const [prUrlDraft, setPrUrlDraft] = useState(issue.prUrl ?? "");
 
   const { data: session } = useQuery({
     queryKey: queryKeys.auth.session,
@@ -503,6 +504,25 @@ export function IssueProperties({ issue, onUpdate, inline }: IssuePropertiesProp
         >
           {projectContent}
         </PropertyPicker>
+
+        {(issue.status === "in_progress" || issue.status === "in_review") && (
+          <PropertyRow label="PR URL">
+            <input
+              type="url"
+              className="flex-1 text-sm bg-transparent outline-none border-b border-border focus:border-primary placeholder:text-muted-foreground/50"
+              placeholder="https://github.com/org/repo/pull/1"
+              value={prUrlDraft}
+              onChange={(e) => setPrUrlDraft(e.target.value)}
+              onBlur={() => {
+                const trimmed = prUrlDraft.trim();
+                const current = issue.prUrl ?? "";
+                if (trimmed !== current) {
+                  onUpdate({ prUrl: trimmed || null });
+                }
+              }}
+            />
+          </PropertyRow>
+        )}
 
         {issue.parentId && (
           <PropertyRow label="Parent">

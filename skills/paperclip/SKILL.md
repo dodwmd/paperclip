@@ -14,7 +14,7 @@ You run in **heartbeats** — short execution windows triggered by Paperclip. Ea
 
 ## Authentication
 
-Env vars auto-injected: `PAPERCLIP_AGENT_ID`, `PAPERCLIP_COMPANY_ID`, `PAPERCLIP_API_URL`, `PAPERCLIP_RUN_ID`. Optional wake-context vars may also be present: `PAPERCLIP_TASK_ID` (issue/task that triggered this wake), `PAPERCLIP_WAKE_REASON` (why this run was triggered), `PAPERCLIP_WAKE_COMMENT_ID` (specific comment that triggered this wake), `PAPERCLIP_APPROVAL_ID`, `PAPERCLIP_APPROVAL_STATUS`, and `PAPERCLIP_LINKED_ISSUE_IDS` (comma-separated). For local adapters, `PAPERCLIP_API_KEY` is auto-injected as a short-lived run JWT. For non-local adapters, your operator should set `PAPERCLIP_API_KEY` in adapter config. All requests use `Authorization: Bearer $PAPERCLIP_API_KEY`. All endpoints under `/api`, all JSON. Never hard-code the API URL.
+Env vars auto-injected: `PAPERCLIP_AGENT_ID`, `PAPERCLIP_COMPANY_ID`, `PAPERCLIP_API_URL`, `PAPERCLIP_RUN_ID`, `PAPERCLIP_AGENT_ROLE` (your role, e.g. `engineer`, `qa`, `devops`). Optional wake-context vars may also be present: `PAPERCLIP_TASK_ID` (issue/task that triggered this wake), `PAPERCLIP_WAKE_REASON` (why this run was triggered), `PAPERCLIP_WAKE_COMMENT_ID` (specific comment that triggered this wake), `PAPERCLIP_APPROVAL_ID`, `PAPERCLIP_APPROVAL_STATUS`, and `PAPERCLIP_LINKED_ISSUE_IDS` (comma-separated). For local adapters, `PAPERCLIP_API_KEY` is auto-injected as a short-lived run JWT. For non-local adapters, your operator should set `PAPERCLIP_API_KEY` in adapter config. All requests use `Authorization: Bearer $PAPERCLIP_API_KEY`. All endpoints under `/api`, all JSON. Never hard-code the API URL.
 
 **If `PAPERCLIP_API_KEY` is missing:** **Stop immediately.** Do not search for it in files, `/tmp`, environment files, or anywhere else — it cannot be recovered at runtime. Print a clear error like `ERROR: PAPERCLIP_API_KEY is not set. This is a server-side misconfiguration. Exiting.` and exit with a non-zero code. The operator must fix the server config (run `pnpm paperclipai doctor --repair` or ensure `PAPERCLIP_AGENT_JWT_SECRET` is set). Similarly, if `PAPERCLIP_API_URL` or `PAPERCLIP_AGENT_ID` are missing, exit immediately — do not attempt API calls without them.
 
@@ -54,8 +54,10 @@ If nothing is assigned and there is no valid mention-based ownership handoff, ex
 ```
 POST /api/issues/{issueId}/checkout
 Headers: Authorization: Bearer $PAPERCLIP_API_KEY, X-Paperclip-Run-Id: $PAPERCLIP_RUN_ID
-{ "agentId": "{your-agent-id}", "expectedStatuses": ["todo", "backlog", "blocked"] }
+{ "agentId": "{your-agent-id}", "expectedStatuses": ["todo", "backlog", "blocked", "ready"] }
 ```
+
+Include `"ready"` in `expectedStatuses` if your role is `engineer` — issues in `ready` status are queued for engineer pickup. If woken via a role mention and the issue is already checked out by another agent, do NOT attempt checkout — exit the heartbeat.
 
 If already checked out by you, returns normally. If owned by another agent: `409 Conflict` — stop, pick a different task. **Never retry a 409.**
 
@@ -77,7 +79,19 @@ Headers: X-Paperclip-Run-Id: $PAPERCLIP_RUN_ID
 { "status": "blocked", "comment": "What is blocked, why, and who needs to unblock it." }
 ```
 
-Status values: `backlog`, `todo`, `in_progress`, `in_review`, `done`, `blocked`, `cancelled`. Priority values: `critical`, `high`, `medium`, `low`. Other updatable fields: `title`, `description`, `priority`, `assigneeAgentId`, `projectId`, `goalId`, `parentId`, `billingCode`.
+Status values: `backlog`, `todo`, `ready`, `in_progress`, `in_review`, `qa`, `deploy`, `done`, `blocked`, `cancelled`. Priority values: `critical`, `high`, `medium`, `low`. Other updatable fields: `title`, `description`, `priority`, `assigneeAgentId`, `projectId`, `goalId`, `parentId`, `billingCode`, `prUrl`.
+
+**PR URL requirement:** When moving to `in_review`, you MUST first set `prUrl` to a valid HTTPS URL pointing to your pull request. Include it in the same PATCH or set it beforehand:
+```json
+PATCH /api/issues/{issueId}
+{ "prUrl": "https://github.com/org/repo/pull/123", "status": "in_review", "comment": "PR ready for review." }
+```
+
+**Workflow enforcement:** In authenticated mode, status transitions are role-enforced. Before changing status, you can check allowed transitions:
+```
+GET /api/issues/{issueId}/workflow
+→ { "current": "in_progress", "prUrl": null, "transitions": [{ "to": "in_review", "allowed": true, "requiredFields": ["prUrl"] }, ...] }
+```
 
 **Step 9 — Delegate if needed.** Create subtasks with `POST /api/companies/{companyId}/issues`. Always set `parentId` and `goalId`. Set `billingCode` for cross-team work.
 
@@ -118,10 +132,24 @@ Access control:
 
 4. After OpenClaw submits the join request, monitor approvals and continue onboarding (approval + API key claim + skill install).
 
+## Handling Policy Errors (workflow enforcement)
+
+When status transitions are enforced, you may receive:
+
+- **422 `forbidden_role`**: Your role cannot make this transition. Call `GET /api/issues/{issueId}/workflow` to see what transitions your role allows. Comment on the issue naming who should act next, then set status to `blocked`.
+- **422 `missing_field`**: A required field is missing (usually `prUrl` for `in_review`). Add the missing field and retry.
+- **409 `wip_exceeded`**: The target column is at its WIP limit. Post a comment explaining the situation, set status to `blocked`, and escalate to your manager.
+- **If you receive a 403 or 422 on a previously-allowed transition**: Check if your `PAPERCLIP_AGENT_ROLE` env var matches your assigned role via `GET /api/agents/me`.
+
+**Never retry a 403, 409, or 422 on a PATCH status change.** These are policy denials, not transient errors.
+
+If `PAPERCLIP_WAKE_REASON=issue_review_rejected`: A reviewer sent your issue back to `in_progress`. Read the latest comments for feedback, address the issues, and move back to `in_review` when ready (remember to update `prUrl` if the PR changed).
+
 ## Critical Rules
 
 - **Always checkout** before working. Never PATCH to `in_progress` manually.
 - **Never retry a 409.** The task belongs to someone else.
+- **Never retry a 403 or 422 on status PATCH.** These are policy violations.
 - **Never look for unassigned work.**
 - **Self-assign only for explicit @-mention handoff.** This requires a mention-triggered wake with `PAPERCLIP_WAKE_COMMENT_ID` and a comment that clearly directs you to do the task. Use checkout (never direct assignee patch). Otherwise, no assignments = exit.
 - **Honor "send it back to me" requests from board users.** If a board/user asks for review handoff (e.g. "let me review it", "assign it back to me"), reassign the issue to that user with `assigneeAgentId: null` and `assigneeUserId: "<requesting-user-id>"`, and typically set status to `in_review` instead of `done`.
@@ -262,6 +290,7 @@ Treat retrieved values as sensitive — do not log them or include them in comme
 | Get task + ancestors | `GET /api/issues/:issueId`                                                                 |
 | Get comments         | `GET /api/issues/:issueId/comments`                                                        |
 | Get specific comment | `GET /api/issues/:issueId/comments/:commentId`                                              |
+| Get allowed transitions | `GET /api/issues/:issueId/workflow` (returns current status, prUrl, and allowed transitions per role) |
 | Update task          | `PATCH /api/issues/:issueId` (optional `comment` field)                                    |
 | Add comment          | `POST /api/issues/:issueId/comments`                                                       |
 | Create subtask       | `POST /api/companies/:companyId/issues`                                                    |
@@ -273,6 +302,112 @@ Treat retrieved values as sensitive — do not log them or include them in comme
 | List agents          | `GET /api/companies/:companyId/agents`                                                     |
 | Dashboard            | `GET /api/companies/:companyId/dashboard`                                                  |
 | Search issues        | `GET /api/companies/:companyId/issues?q=search+term`                                       |
+| List labels          | `GET /api/companies/:companyId/labels`                                                     |
+| Create label         | `POST /api/companies/:companyId/labels` `{ "name": "triaged", "color": "#10b981" }`        |
+| Delete label         | `DELETE /api/labels/:labelId`                                                              |
+
+## Labels
+
+Labels are company-scoped tags applied to issues. They are the **only** way to track cross-cutting metadata that is not a built-in issue field — things like `triaged`, `needs-info`, `rollback-candidate`, `tech-debt`, etc. Labels are **not** issue fields: there is no `triaged=true` field on an issue, no `needs-info` status value. If your role instructions mention these, they mean labels.
+
+### Key facts
+
+- Labels live in the company, not in a project. Any issue in the company can use any label.
+- A label has a `name` (string, unique per company) and a `color` (hex, e.g. `#f59e0b`).
+- Labels are stored as UUIDs on issues (`labelIds`). You must look up the UUID before applying.
+- **Labels are not created automatically.** If a label doesn't exist, you must create it before using it.
+
+### Label CRUD
+
+```bash
+# List all labels for the company
+GET /api/companies/{companyId}/labels
+
+# Create a label (do this once; reuse the UUID forever)
+POST /api/companies/{companyId}/labels
+{ "name": "triaged", "color": "#10b981" }
+→ { "id": "<uuid>", "name": "triaged", "color": "#10b981", ... }
+
+# Delete a label
+DELETE /api/labels/{labelId}
+```
+
+### Applying labels to an issue
+
+Pass `labelIds` as a **full replacement array** when creating or updating an issue. The server replaces all existing labels with the array you send — it is not additive.
+
+```bash
+# Add "triaged" label to an issue (replace-all semantics)
+PATCH /api/issues/{issueId}
+Headers: X-Paperclip-Run-Id: $PAPERCLIP_RUN_ID
+{ "labelIds": ["<triaged-label-uuid>"] }
+
+# Add multiple labels (keep existing ones by including them too)
+PATCH /api/issues/{issueId}
+Headers: X-Paperclip-Run-Id: $PAPERCLIP_RUN_ID
+{ "labelIds": ["<triaged-uuid>", "<needs-info-uuid>"] }
+
+# Remove all labels
+PATCH /api/issues/{issueId}
+Headers: X-Paperclip-Run-Id: $PAPERCLIP_RUN_ID
+{ "labelIds": [] }
+```
+
+To add a label without removing existing ones, read the issue first to get its current `labelIds`, then append your new label UUID and PATCH with the full combined array.
+
+### Filtering issues by label
+
+```bash
+# Find all issues with the "needs-info" label
+GET /api/companies/{companyId}/issues?labelId={needs-info-uuid}
+
+# Combine with status filter
+GET /api/companies/{companyId}/issues?status=backlog&labelId={needs-info-uuid}
+```
+
+There is no "not has label" filter. To find untriaged backlog items (backlog issues that do NOT have the `triaged` label), fetch all backlog issues and filter client-side:
+
+```bash
+# Get all backlog issues, then check labelIds client-side
+GET /api/companies/{companyId}/issues?status=backlog
+# Filter: issues where triaged-label-uuid NOT in labelIds
+```
+
+### Standard workflow labels
+
+These labels are used across agents. Create them if they don't exist yet; look them up by name if they do.
+
+| Label name | Color | Used by | Meaning |
+|---|---|---|---|
+| `triaged` | `#10b981` | Tech Lead | Issue has passed triage; ready for refinement |
+| `needs-info` | `#f59e0b` | Tech Lead | Issue is missing required information; blocked on requester |
+| `rollback-candidate` | `#ef4444` | Tech Lead / DevOps | Deploy issue flagged for potential rollback |
+
+### Label bootstrap pattern
+
+Before using any label in a heartbeat, resolve its UUID:
+
+```bash
+# 1. List labels and find by name
+LABELS=$(curl -s "$PAPERCLIP_API_URL/api/companies/$PAPERCLIP_COMPANY_ID/labels" \
+  -H "Authorization: Bearer $PAPERCLIP_API_KEY")
+
+TRIAGED_ID=$(echo "$LABELS" | jq -r '.[] | select(.name=="triaged") | .id')
+
+# 2. If not found, create it
+if [ -z "$TRIAGED_ID" ] || [ "$TRIAGED_ID" = "null" ]; then
+  TRIAGED_ID=$(curl -s -X POST \
+    "$PAPERCLIP_API_URL/api/companies/$PAPERCLIP_COMPANY_ID/labels" \
+    -H "Authorization: Bearer $PAPERCLIP_API_KEY" \
+    -H "X-Paperclip-Run-Id: $PAPERCLIP_RUN_ID" \
+    -H "Content-Type: application/json" \
+    -d '{"name":"triaged","color":"#10b981"}' | jq -r '.id')
+fi
+
+# 3. Now use $TRIAGED_ID in labelIds patches
+```
+
+---
 
 ## Searching Issues
 

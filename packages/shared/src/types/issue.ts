@@ -72,6 +72,7 @@ export interface Issue {
   identifier: string | null;
   requestDepth: number;
   billingCode: string | null;
+  prUrl: string | null;
   assigneeAdapterOverrides: IssueAssigneeAdapterOverrides | null;
   startedAt: Date | null;
   completedAt: Date | null;

@@ -1,0 +1,18 @@
+/**
+ * Server-side Kanban policy engine.
+ *
+ * Imports pure data and pure functions from @paperclipai/shared.
+ * This module adds server-specific helpers (WIP DB queries, actor role
+ * resolution) on top of the shared policy primitives.
+ */
+export {
+  DEFAULT_TRANSITION_RULES,
+  WIP_LIMITS,
+  checkTransitionPolicy,
+  checkWipPolicy,
+  type TransitionRule,
+  type TransitionCheckResult,
+  type TransitionDeniedReason,
+  type TransitionActor,
+  type ActorKind,
+} from "@paperclipai/shared";

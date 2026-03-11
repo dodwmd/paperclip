@@ -6,6 +6,7 @@ import { agentsApi } from "../api/agents";
 import { heartbeatsApi } from "../api/heartbeats";
 import { useCompany } from "../context/CompanyContext";
 import { useBreadcrumbs } from "../context/BreadcrumbContext";
+import { useToast } from "../context/ToastContext";
 import { queryKeys } from "../lib/queryKeys";
 import { EmptyState } from "../components/EmptyState";
 import { IssuesList } from "../components/IssuesList";
@@ -16,6 +17,7 @@ export function Issues() {
   const { setBreadcrumbs } = useBreadcrumbs();
   const [searchParams] = useSearchParams();
   const queryClient = useQueryClient();
+  const { pushToast } = useToast();
 
   const initialSearch = searchParams.get("q") ?? "";
   const debounceRef = useRef<ReturnType<typeof setTimeout>>(undefined);
@@ -77,6 +79,11 @@ export function Issues() {
     mutationFn: ({ id, data }: { id: string; data: Record<string, unknown> }) =>
       issuesApi.update(id, data),
     onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.issues.list(selectedCompanyId!) });
+    },
+    onError: (err) => {
+      const message = err instanceof Error ? err.message : "Failed to update issue";
+      pushToast({ title: "Update failed", body: message, tone: "error" });
       queryClient.invalidateQueries({ queryKey: queryKeys.issues.list(selectedCompanyId!) });
     },
   });

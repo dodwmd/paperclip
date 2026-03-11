@@ -1,4 +1,15 @@
 export { companyService } from "./companies.js";
+export {
+  DEFAULT_TRANSITION_RULES,
+  WIP_LIMITS,
+  checkTransitionPolicy,
+  checkWipPolicy,
+  type TransitionRule,
+  type TransitionCheckResult,
+  type TransitionDeniedReason,
+  type TransitionActor,
+  type ActorKind,
+} from "./kanban-policy.js";
 export { agentService, deduplicateAgentName } from "./agents.js";
 export { assetService } from "./assets.js";
 export { projectService } from "./projects.js";

@@ -554,6 +554,7 @@ export function IssuesList({
           agents={agents}
           liveIssueIds={liveIssueIds}
           onUpdateIssue={onUpdateIssue}
+          isFiltered={normalizedIssueSearch.length > 0 || activeFilterCount > 0}
         />
       ) : (
         groupedContent.map((group) => (

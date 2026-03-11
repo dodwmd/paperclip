@@ -18,3 +18,7 @@ export const API = {
   members: `${API_PREFIX}/members`,
   admin: `${API_PREFIX}/admin`,
 } as const;
+
+export function issueWorkflowPath(id: string): string {
+  return `${API_PREFIX}/issues/${id}/workflow`;
+}

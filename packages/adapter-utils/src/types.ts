@@ -8,6 +8,8 @@ export interface AdapterAgent {
   name: string;
   adapterType: string | null;
   adapterConfig: unknown;
+  /** Agent role (e.g. "engineer", "qa", "devops"). Used for Kanban workflow enforcement. */
+  role?: string | null;
 }
 
 export interface AdapterRuntime {

@@ -954,6 +954,11 @@ export function agentRoutes(db: Db) {
       return;
     }
 
+    // Security: agents cannot change role assignments (prevents privilege escalation)
+    if (Object.prototype.hasOwnProperty.call(req.body, "role") && req.actor.type === "agent") {
+      throw forbidden("Agents cannot change role assignments");
+    }
+
     const patchData = { ...(req.body as Record<string, unknown>) };
     if (Object.prototype.hasOwnProperty.call(patchData, "adapterConfig")) {
       const adapterConfig = asRecord(patchData.adapterConfig);

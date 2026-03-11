@@ -16,14 +16,31 @@ import {
   projectWorkspaces,
   projects,
 } from "@paperclipai/db";
-import { extractProjectMentionIds } from "@paperclipai/shared";
+import { extractProjectMentionIds, ISSUE_STATUSES } from "@paperclipai/shared";
 import { conflict, notFound, unprocessable } from "../errors.js";
 
-const ALL_ISSUE_STATUSES = ["backlog", "todo", "in_progress", "in_review", "blocked", "done", "cancelled"];
+const ROLE_MENTION_MAP: Record<string, string> = {
+  pm: "pm",
+  productowner: "pm",
+  "product-owner": "pm",
+  po: "pm",
+  techlead: "cto",
+  "tech-lead": "cto",
+  cto: "cto",
+  ceo: "ceo",
+  engineer: "engineer",
+  dev: "engineer",
+  developer: "engineer",
+  qa: "qa",
+  devops: "devops",
+  designer: "designer",
+  researcher: "researcher",
+  general: "general",
+};
 
 function assertTransition(from: string, to: string) {
   if (from === to) return;
-  if (!ALL_ISSUE_STATUSES.includes(to)) {
+  if (!(ISSUE_STATUSES as readonly string[]).includes(to)) {
     throw conflict(`Unknown issue status: ${to}`);
   }
 }
@@ -1216,9 +1233,30 @@ export function issueService(db: Db) {
       let m: RegExpExecArray | null;
       while ((m = re.exec(body)) !== null) tokens.add(m[1].toLowerCase());
       if (tokens.size === 0) return [];
-      const rows = await db.select({ id: agents.id, name: agents.name })
+
+      // Resolve role aliases (e.g., @dev → engineer, @techlead → cto)
+      const roleTokens = new Set<string>();
+      for (const token of tokens) {
+        const mappedRole = ROLE_MENTION_MAP[token];
+        if (mappedRole) roleTokens.add(mappedRole);
+      }
+
+      const rows = await db.select({ id: agents.id, name: agents.name, role: agents.role })
         .from(agents).where(eq(agents.companyId, companyId));
-      return rows.filter(a => tokens.has(a.name.toLowerCase())).map(a => a.id);
+
+      const matchedIds = new Set<string>();
+      for (const agent of rows) {
+        const nameLower = agent.name.toLowerCase();
+        // Match by name
+        if (tokens.has(nameLower)) {
+          matchedIds.add(agent.id);
+        }
+        // Match by role fan-out
+        if (agent.role && roleTokens.has(agent.role)) {
+          matchedIds.add(agent.id);
+        }
+      }
+      return [...matchedIds];
     },
 
     findMentionedProjectIds: async (issueId: string) => {
@@ -1385,6 +1423,39 @@ export function issueService(db: Db) {
         project: a.projectId ? projectMap.get(a.projectId) ?? null : null,
         goal: a.goalId ? goalMap.get(a.goalId) ?? null : null,
       }));
+    },
+
+    /**
+     * Count issues in a given status for a company.
+     * NOTE: Only call from WIP enforcement on active columns (ready, in_progress,
+     * in_review, qa). Avoid on terminal statuses (done, cancelled) from hot paths.
+     */
+    countByStatus: async (companyId: string, status: string) => {
+      const result = await db
+        .select({ count: sql<number>`count(*)` })
+        .from(issues)
+        .where(and(eq(issues.companyId, companyId), eq(issues.status, status)))
+        .then((rows) => rows[0]);
+      return Number(result?.count ?? 0);
+    },
+
+    /**
+     * Count issues in a given status for a specific assignee.
+     * NOTE: Only call from WIP enforcement on active columns.
+     */
+    countByStatusAndAssignee: async (companyId: string, status: string, assigneeAgentId: string) => {
+      const result = await db
+        .select({ count: sql<number>`count(*)` })
+        .from(issues)
+        .where(
+          and(
+            eq(issues.companyId, companyId),
+            eq(issues.status, status),
+            eq(issues.assigneeAgentId, assigneeAgentId),
+          ),
+        )
+        .then((rows) => rows[0]);
+      return Number(result?.count ?? 0);
     },
 
     staleCount: async (companyId: string, minutes = 60) => {
