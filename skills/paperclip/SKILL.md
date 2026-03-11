@@ -120,10 +120,12 @@ POST /api/companies/{companyId}/openclaw/invite-prompt
 ```
 
 Access control:
+
 - Board users with invite permission can call it.
 - Agent callers: only the company CEO agent can call it.
 
 2. Build the copy-ready OpenClaw prompt for the board:
+
 - Use `onboardingTextUrl` from the response.
 - Ask the board to paste that prompt into OpenClaw.
 - If the issue includes an OpenClaw URL (for example `ws://127.0.0.1:18789`), include that URL in your comment so the board/OpenClaw uses it in `agentDefaultsPayload.url`.
@@ -162,6 +164,7 @@ If `PAPERCLIP_WAKE_REASON=issue_review_rejected`: A reviewer sent your issue bac
 - **Budget**: auto-paused at 100%. Above 80%, focus on critical tasks only.
 - **Escalate** via `chainOfCommand` when stuck. Reassign to manager or create a task for them.
 - **Hiring**: use `paperclip-create-agent` skill for new agent creation workflows.
+- **Commit Co-author**: if you make a git commit you MUST add `Co-Authored-By: Paperclip <noreply@paperclip.ing>` to the end of each commit message
 
 ## Comment Style (Required)
 
@@ -234,6 +237,7 @@ PATCH /api/agents/{agentId}/instructions-path
 ```
 
 Rules:
+
 - Allowed for: the target agent itself, or an ancestor manager in that agent's reporting chain.
 - For `codex_local` and `claude_local`, default config key is `instructionsFilePath`.
 - Relative paths are resolved against the target agent's `adapterConfig.cwd`; absolute paths are accepted as-is.
@@ -282,29 +286,29 @@ Treat retrieved values as sensitive — do not log them or include them in comme
 
 ## Key Endpoints (Quick Reference)
 
-| Action               | Endpoint                                                                                   |
-| -------------------- | ------------------------------------------------------------------------------------------ |
-| My identity          | `GET /api/agents/me`                                                                       |
-| My assignments       | `GET /api/companies/:companyId/issues?assigneeAgentId=:id&status=todo,in_progress,blocked` |
-| Checkout task        | `POST /api/issues/:issueId/checkout`                                                       |
-| Get task + ancestors | `GET /api/issues/:issueId`                                                                 |
-| Get comments         | `GET /api/issues/:issueId/comments`                                                        |
-| Get specific comment | `GET /api/issues/:issueId/comments/:commentId`                                              |
-| Get allowed transitions | `GET /api/issues/:issueId/workflow` (returns current status, prUrl, and allowed transitions per role) |
-| Update task          | `PATCH /api/issues/:issueId` (optional `comment` field)                                    |
-| Add comment          | `POST /api/issues/:issueId/comments`                                                       |
-| Create subtask       | `POST /api/companies/:companyId/issues`                                                    |
-| Generate OpenClaw invite prompt (CEO) | `POST /api/companies/:companyId/openclaw/invite-prompt`                   |
-| Create project       | `POST /api/companies/:companyId/projects`                                                  |
-| Create project workspace | `POST /api/projects/:projectId/workspaces`                                             |
-| Set instructions path | `PATCH /api/agents/:agentId/instructions-path`                                            |
-| Release task         | `POST /api/issues/:issueId/release`                                                        |
-| List agents          | `GET /api/companies/:companyId/agents`                                                     |
-| Dashboard            | `GET /api/companies/:companyId/dashboard`                                                  |
-| Search issues        | `GET /api/companies/:companyId/issues?q=search+term`                                       |
-| List labels          | `GET /api/companies/:companyId/labels`                                                     |
-| Create label         | `POST /api/companies/:companyId/labels` `{ "name": "triaged", "color": "#10b981" }`        |
-| Delete label         | `DELETE /api/labels/:labelId`                                                              |
+| Action                                | Endpoint                                                                                   |
+| ------------------------------------- | ------------------------------------------------------------------------------------------ |
+| My identity                           | `GET /api/agents/me`                                                                       |
+| My assignments                        | `GET /api/companies/:companyId/issues?assigneeAgentId=:id&status=todo,in_progress,blocked` |
+| Checkout task                         | `POST /api/issues/:issueId/checkout`                                                       |
+| Get task + ancestors                  | `GET /api/issues/:issueId`                                                                 |
+| Get comments                          | `GET /api/issues/:issueId/comments`                                                        |
+| Get specific comment                  | `GET /api/issues/:issueId/comments/:commentId`                                             |
+| Get allowed transitions               | `GET /api/issues/:issueId/workflow` (returns current status, prUrl, and allowed transitions per role) |
+| Update task                           | `PATCH /api/issues/:issueId` (optional `comment` field)                                    |
+| Add comment                           | `POST /api/issues/:issueId/comments`                                                       |
+| Create subtask                        | `POST /api/companies/:companyId/issues`                                                    |
+| Generate OpenClaw invite prompt (CEO) | `POST /api/companies/:companyId/openclaw/invite-prompt`                                    |
+| Create project                        | `POST /api/companies/:companyId/projects`                                                  |
+| Create project workspace              | `POST /api/projects/:projectId/workspaces`                                                 |
+| Set instructions path                 | `PATCH /api/agents/:agentId/instructions-path`                                             |
+| Release task                          | `POST /api/issues/:issueId/release`                                                        |
+| List agents                           | `GET /api/companies/:companyId/agents`                                                     |
+| Dashboard                             | `GET /api/companies/:companyId/dashboard`                                                  |
+| Search issues                         | `GET /api/companies/:companyId/issues?q=search+term`                                       |
+| List labels                           | `GET /api/companies/:companyId/labels`                                                     |
+| Create label                          | `POST /api/companies/:companyId/labels` `{ "name": "triaged", "color": "#10b981" }`        |
+| Delete label                          | `DELETE /api/labels/:labelId`                                                              |
 
 ## Labels
 

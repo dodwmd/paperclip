@@ -36,6 +36,7 @@ import {
   Paperclip,
   FileText,
   X,
+  Loader2,
 } from "lucide-react";
 import { cn } from "../lib/utils";
 import { extractProviderIdWithFallback } from "../lib/model-utils";
@@ -46,6 +47,8 @@ import { InlineEntitySelector, type InlineEntityOption } from "./InlineEntitySel
 
 const DRAFT_KEY = "paperclip:issue-draft";
 const DEBOUNCE_MS = 800;
+// TODO(issue-worktree-support): re-enable this UI once the workflow is ready to ship.
+const SHOW_EXPERIMENTAL_ISSUE_WORKTREE_UI = false;
 
 /** Return black or white hex based on background luminance (WCAG perceptual weights). */
 function getContrastTextColor(hexColor: string): string {
@@ -67,7 +70,7 @@ interface IssueDraft {
   assigneeModelOverride: string;
   assigneeThinkingEffort: string;
   assigneeChrome: boolean;
-  assigneeUseProjectWorkspace: boolean;
+  useIsolatedExecutionWorkspace: boolean;
 }
 
 const ISSUE_OVERRIDE_ADAPTER_TYPES = new Set(["claude_local", "codex_local", "opencode_local"]);
@@ -101,7 +104,6 @@ function buildAssigneeAdapterOverrides(input: {
   modelOverride: string;
   thinkingEffortOverride: string;
   chrome: boolean;
-  useProjectWorkspace: boolean;
 }): Record<string, unknown> | null {
   const adapterType = input.adapterType ?? null;
   if (!adapterType || !ISSUE_OVERRIDE_ADAPTER_TYPES.has(adapterType)) {
@@ -128,9 +130,6 @@ function buildAssigneeAdapterOverrides(input: {
   const overrides: Record<string, unknown> = {};
   if (Object.keys(adapterConfig).length > 0) {
     overrides.adapterConfig = adapterConfig;
-  }
-  if (!input.useProjectWorkspace) {
-    overrides.useProjectWorkspace = false;
   }
   return Object.keys(overrides).length > 0 ? overrides : null;
 }
@@ -182,12 +181,13 @@ export function NewIssueDialog() {
   const [assigneeModelOverride, setAssigneeModelOverride] = useState("");
   const [assigneeThinkingEffort, setAssigneeThinkingEffort] = useState("");
   const [assigneeChrome, setAssigneeChrome] = useState(false);
-  const [assigneeUseProjectWorkspace, setAssigneeUseProjectWorkspace] = useState(true);
+  const [useIsolatedExecutionWorkspace, setUseIsolatedExecutionWorkspace] = useState(false);
   const [expanded, setExpanded] = useState(false);
   const [dialogCompanyId, setDialogCompanyId] = useState<string | null>(null);
   const [sessionTranscript, setSessionTranscript] = useState<string | null>(null);
   const [sessionTranscriptLabel, setSessionTranscriptLabel] = useState<string | null>(null);
   const draftTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const executionWorkspaceDefaultProjectId = useRef<string | null>(null);
 
   const effectiveCompanyId = dialogCompanyId ?? selectedCompanyId;
   const dialogCompany = companies.find((c) => c.id === effectiveCompanyId) ?? selectedCompany;
@@ -304,7 +304,7 @@ export function NewIssueDialog() {
       assigneeModelOverride,
       assigneeThinkingEffort,
       assigneeChrome,
-      assigneeUseProjectWorkspace,
+      useIsolatedExecutionWorkspace,
     });
   }, [
     title,
@@ -316,7 +316,7 @@ export function NewIssueDialog() {
     assigneeModelOverride,
     assigneeThinkingEffort,
     assigneeChrome,
-    assigneeUseProjectWorkspace,
+    useIsolatedExecutionWorkspace,
     newIssueOpen,
     scheduleSave,
   ]);
@@ -325,6 +325,7 @@ export function NewIssueDialog() {
   useEffect(() => {
     if (!newIssueOpen) return;
     setDialogCompanyId(selectedCompanyId);
+    executionWorkspaceDefaultProjectId.current = null;
 
     const draft = loadDraft();
     if (newIssueDefaults.title) {
@@ -337,7 +338,7 @@ export function NewIssueDialog() {
       setAssigneeModelOverride("");
       setAssigneeThinkingEffort("");
       setAssigneeChrome(false);
-      setAssigneeUseProjectWorkspace(true);
+      setUseIsolatedExecutionWorkspace(false);
     } else if (draft && draft.title.trim()) {
       setTitle(draft.title);
       setDescription(draft.description);
@@ -348,7 +349,7 @@ export function NewIssueDialog() {
       setAssigneeModelOverride(draft.assigneeModelOverride ?? "");
       setAssigneeThinkingEffort(draft.assigneeThinkingEffort ?? "");
       setAssigneeChrome(draft.assigneeChrome ?? false);
-      setAssigneeUseProjectWorkspace(draft.assigneeUseProjectWorkspace ?? true);
+      setUseIsolatedExecutionWorkspace(draft.useIsolatedExecutionWorkspace ?? false);
     } else {
       setStatus(newIssueDefaults.status ?? "todo");
       setPriority(newIssueDefaults.priority ?? "");
@@ -357,7 +358,7 @@ export function NewIssueDialog() {
       setAssigneeModelOverride("");
       setAssigneeThinkingEffort("");
       setAssigneeChrome(false);
-      setAssigneeUseProjectWorkspace(true);
+      setUseIsolatedExecutionWorkspace(false);
     }
     setSessionTranscript(newIssueDefaults.sessionTranscript ?? null);
     setSessionTranscriptLabel(newIssueDefaults.sessionTranscriptLabel ?? null);
@@ -369,7 +370,6 @@ export function NewIssueDialog() {
       setAssigneeModelOverride("");
       setAssigneeThinkingEffort("");
       setAssigneeChrome(false);
-      setAssigneeUseProjectWorkspace(true);
       return;
     }
 
@@ -402,12 +402,17 @@ export function NewIssueDialog() {
     setAssigneeModelOverride("");
     setAssigneeThinkingEffort("");
     setAssigneeChrome(false);
-    setAssigneeUseProjectWorkspace(true);
+    setUseIsolatedExecutionWorkspace(false);
     setExpanded(false);
     setDialogCompanyId(null);
     setCompanyOpen(false);
+<<<<<<< HEAD
     setSessionTranscript(null);
     setSessionTranscriptLabel(null);
+||||||| ef978dd
+=======
+    executionWorkspaceDefaultProjectId.current = null;
+>>>>>>> upstream/master
   }
 
   function handleCompanyChange(companyId: string) {
@@ -418,7 +423,7 @@ export function NewIssueDialog() {
     setAssigneeModelOverride("");
     setAssigneeThinkingEffort("");
     setAssigneeChrome(false);
-    setAssigneeUseProjectWorkspace(true);
+    setUseIsolatedExecutionWorkspace(false);
   }
 
   function discardDraft() {
@@ -428,18 +433,30 @@ export function NewIssueDialog() {
   }
 
   function handleSubmit() {
-    if (!effectiveCompanyId || !title.trim()) return;
+    if (!effectiveCompanyId || !title.trim() || createIssue.isPending) return;
     const assigneeAdapterOverrides = buildAssigneeAdapterOverrides({
       adapterType: assigneeAdapterType,
       modelOverride: assigneeModelOverride,
       thinkingEffortOverride: assigneeThinkingEffort,
       chrome: assigneeChrome,
-      useProjectWorkspace: assigneeUseProjectWorkspace,
     });
+<<<<<<< HEAD
     const baseDescription = description.trim();
     const fullDescription = sessionTranscript
       ? (baseDescription ? `${baseDescription}\n\n` : "") + `<session-transcript>\n${sessionTranscript}\n</session-transcript>`
       : baseDescription || undefined;
+||||||| ef978dd
+=======
+    const selectedProject = orderedProjects.find((project) => project.id === projectId);
+    const executionWorkspacePolicy = SHOW_EXPERIMENTAL_ISSUE_WORKTREE_UI
+      ? selectedProject?.executionWorkspacePolicy
+      : null;
+    const executionWorkspaceSettings = executionWorkspacePolicy?.enabled
+      ? {
+          mode: useIsolatedExecutionWorkspace ? "isolated" : "project_primary",
+        }
+      : null;
+>>>>>>> upstream/master
     createIssue.mutate({
       companyId: effectiveCompanyId,
       title: title.trim(),
@@ -449,6 +466,7 @@ export function NewIssueDialog() {
       ...(assigneeId ? { assigneeAgentId: assigneeId } : {}),
       ...(projectId ? { projectId } : {}),
       ...(assigneeAdapterOverrides ? { assigneeAdapterOverrides } : {}),
+      ...(executionWorkspaceSettings ? { executionWorkspaceSettings } : {}),
     });
   }
 
@@ -479,6 +497,10 @@ export function NewIssueDialog() {
   const currentPriority = priorities.find((p) => p.value === priority);
   const currentAssignee = (agents ?? []).find((a) => a.id === assigneeId);
   const currentProject = orderedProjects.find((project) => project.id === projectId);
+  const currentProjectExecutionWorkspacePolicy = SHOW_EXPERIMENTAL_ISSUE_WORKTREE_UI
+    ? currentProject?.executionWorkspacePolicy ?? null
+    : null;
+  const currentProjectSupportsExecutionWorkspace = Boolean(currentProjectExecutionWorkspacePolicy?.enabled);
   const assigneeOptionsTitle =
     assigneeAdapterType === "claude_local"
       ? "Claude options"
@@ -515,6 +537,35 @@ export function NewIssueDialog() {
       })),
     [orderedProjects],
   );
+  const savedDraft = loadDraft();
+  const hasSavedDraft = Boolean(savedDraft?.title.trim() || savedDraft?.description.trim());
+  const canDiscardDraft = hasDraft || hasSavedDraft;
+  const createIssueErrorMessage =
+    createIssue.error instanceof Error ? createIssue.error.message : "Failed to create issue. Try again.";
+
+  const handleProjectChange = useCallback((nextProjectId: string) => {
+    setProjectId(nextProjectId);
+    const nextProject = orderedProjects.find((project) => project.id === nextProjectId);
+    const policy = SHOW_EXPERIMENTAL_ISSUE_WORKTREE_UI ? nextProject?.executionWorkspacePolicy : null;
+    executionWorkspaceDefaultProjectId.current = nextProjectId || null;
+    setUseIsolatedExecutionWorkspace(Boolean(policy?.enabled && policy.defaultMode === "isolated"));
+  }, [orderedProjects]);
+
+  useEffect(() => {
+    if (!newIssueOpen || !projectId || executionWorkspaceDefaultProjectId.current === projectId) {
+      return;
+    }
+    const project = orderedProjects.find((entry) => entry.id === projectId);
+    if (!project) return;
+    executionWorkspaceDefaultProjectId.current = projectId;
+    setUseIsolatedExecutionWorkspace(
+      Boolean(
+        SHOW_EXPERIMENTAL_ISSUE_WORKTREE_UI &&
+        project.executionWorkspacePolicy?.enabled &&
+        project.executionWorkspacePolicy.defaultMode === "isolated",
+      ),
+    );
+  }, [newIssueOpen, orderedProjects, projectId]);
   const modelOverrideOptions = useMemo<InlineEntityOption[]>(
     () => {
       return [...(assigneeAdapterModels ?? [])]
@@ -538,7 +589,7 @@ export function NewIssueDialog() {
     <Dialog
       open={newIssueOpen}
       onOpenChange={(open) => {
-        if (!open) closeNewIssue();
+        if (!open && !createIssue.isPending) closeNewIssue();
       }}
     >
       <DialogContent
@@ -551,7 +602,16 @@ export function NewIssueDialog() {
             : "sm:max-w-lg"
         )}
         onKeyDown={handleKeyDown}
+        onEscapeKeyDown={(event) => {
+          if (createIssue.isPending) {
+            event.preventDefault();
+          }
+        }}
         onPointerDownOutside={(event) => {
+          if (createIssue.isPending) {
+            event.preventDefault();
+            return;
+          }
           // Radix Dialog's modal DismissableLayer calls preventDefault() on
           // pointerdown events that originate outside the Dialog DOM tree.
           // Popover portals render at the body level (outside the Dialog), so
@@ -629,6 +689,7 @@ export function NewIssueDialog() {
               size="icon-xs"
               className="text-muted-foreground"
               onClick={() => setExpanded(!expanded)}
+              disabled={createIssue.isPending}
             >
               {expanded ? <Minimize2 className="h-3.5 w-3.5" /> : <Maximize2 className="h-3.5 w-3.5" />}
             </Button>
@@ -637,6 +698,7 @@ export function NewIssueDialog() {
               size="icon-xs"
               className="text-muted-foreground"
               onClick={() => closeNewIssue()}
+              disabled={createIssue.isPending}
             >
               <span className="text-lg leading-none">&times;</span>
             </Button>
@@ -655,6 +717,7 @@ export function NewIssueDialog() {
               e.target.style.height = "auto";
               e.target.style.height = `${e.target.scrollHeight}px`;
             }}
+            readOnly={createIssue.isPending}
             onKeyDown={(e) => {
               if (e.key === "Enter" && !e.metaKey && !e.ctrlKey) {
                 e.preventDefault();
@@ -717,7 +780,7 @@ export function NewIssueDialog() {
                 noneLabel="No project"
                 searchPlaceholder="Search projects..."
                 emptyMessage="No projects found."
-                onChange={setProjectId}
+                onChange={handleProjectChange}
                 onConfirm={() => {
                   descriptionEditorRef.current?.focus();
                 }}
@@ -751,6 +814,34 @@ export function NewIssueDialog() {
             </div>
           </div>
         </div>
+
+        {currentProjectSupportsExecutionWorkspace && (
+          <div className="px-4 pb-2 shrink-0">
+            <div className="flex items-center justify-between rounded-md border border-border px-3 py-2">
+              <div className="space-y-0.5">
+                <div className="text-xs font-medium">Use isolated issue checkout</div>
+                <div className="text-[11px] text-muted-foreground">
+                  Create an issue-specific execution workspace instead of using the project's primary checkout.
+                </div>
+              </div>
+              <button
+                className={cn(
+                  "relative inline-flex h-5 w-9 items-center rounded-full transition-colors",
+                  useIsolatedExecutionWorkspace ? "bg-green-600" : "bg-muted",
+                )}
+                onClick={() => setUseIsolatedExecutionWorkspace((value) => !value)}
+                type="button"
+              >
+                <span
+                  className={cn(
+                    "inline-block h-3.5 w-3.5 rounded-full bg-white transition-transform",
+                    useIsolatedExecutionWorkspace ? "translate-x-4.5" : "translate-x-0.5",
+                  )}
+                />
+              </button>
+            </div>
+          </div>
+        )}
 
         {supportsAssigneeOverrides && (
           <div className="px-4 pb-2 shrink-0">
@@ -812,23 +903,6 @@ export function NewIssueDialog() {
                     </button>
                   </div>
                 )}
-                <div className="flex items-center justify-between rounded-md border border-border px-2 py-1.5">
-                  <div className="text-xs text-muted-foreground">Use project workspace</div>
-                  <button
-                    className={cn(
-                      "relative inline-flex h-5 w-9 items-center rounded-full transition-colors",
-                      assigneeUseProjectWorkspace ? "bg-green-600" : "bg-muted"
-                    )}
-                    onClick={() => setAssigneeUseProjectWorkspace((value) => !value)}
-                  >
-                    <span
-                      className={cn(
-                        "inline-block h-3.5 w-3.5 rounded-full bg-white transition-transform",
-                        assigneeUseProjectWorkspace ? "translate-x-4.5" : "translate-x-0.5"
-                      )}
-                    />
-                  </button>
-                </div>
               </div>
             )}
           </div>
@@ -977,17 +1051,36 @@ export function NewIssueDialog() {
             size="sm"
             className="text-muted-foreground"
             onClick={discardDraft}
-            disabled={!hasDraft && !loadDraft()}
+            disabled={createIssue.isPending || !canDiscardDraft}
           >
             Discard Draft
           </Button>
-          <Button
-            size="sm"
-            disabled={!title.trim() || createIssue.isPending}
-            onClick={handleSubmit}
-          >
-            {createIssue.isPending ? "Creating..." : "Create Issue"}
-          </Button>
+          <div className="flex items-center gap-3">
+            <div className="min-h-5 text-right">
+              {createIssue.isPending ? (
+                <span className="inline-flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
+                  <Loader2 className="h-3 w-3 animate-spin" />
+                  Creating issue...
+                </span>
+              ) : createIssue.isError ? (
+                <span className="text-xs text-destructive">{createIssueErrorMessage}</span>
+              ) : canDiscardDraft ? (
+                <span className="text-xs text-muted-foreground">Draft autosaves locally</span>
+              ) : null}
+            </div>
+            <Button
+              size="sm"
+              className="min-w-[8.5rem] disabled:opacity-100"
+              disabled={!title.trim() || createIssue.isPending}
+              onClick={handleSubmit}
+              aria-busy={createIssue.isPending}
+            >
+              <span className="inline-flex items-center justify-center gap-1.5">
+                {createIssue.isPending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : null}
+                <span>{createIssue.isPending ? "Creating..." : "Create Issue"}</span>
+              </span>
+            </Button>
+          </div>
         </div>
       </DialogContent>
     </Dialog>
