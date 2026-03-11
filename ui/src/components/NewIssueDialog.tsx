@@ -406,13 +406,9 @@ export function NewIssueDialog() {
     setExpanded(false);
     setDialogCompanyId(null);
     setCompanyOpen(false);
-<<<<<<< HEAD
     setSessionTranscript(null);
     setSessionTranscriptLabel(null);
-||||||| ef978dd
-=======
     executionWorkspaceDefaultProjectId.current = null;
->>>>>>> upstream/master
   }
 
   function handleCompanyChange(companyId: string) {
@@ -440,13 +436,10 @@ export function NewIssueDialog() {
       thinkingEffortOverride: assigneeThinkingEffort,
       chrome: assigneeChrome,
     });
-<<<<<<< HEAD
     const baseDescription = description.trim();
     const fullDescription = sessionTranscript
       ? (baseDescription ? `${baseDescription}\n\n` : "") + `<session-transcript>\n${sessionTranscript}\n</session-transcript>`
       : baseDescription || undefined;
-||||||| ef978dd
-=======
     const selectedProject = orderedProjects.find((project) => project.id === projectId);
     const executionWorkspacePolicy = SHOW_EXPERIMENTAL_ISSUE_WORKTREE_UI
       ? selectedProject?.executionWorkspacePolicy
@@ -456,7 +449,6 @@ export function NewIssueDialog() {
           mode: useIsolatedExecutionWorkspace ? "isolated" : "project_primary",
         }
       : null;
->>>>>>> upstream/master
     createIssue.mutate({
       companyId: effectiveCompanyId,
       title: title.trim(),
