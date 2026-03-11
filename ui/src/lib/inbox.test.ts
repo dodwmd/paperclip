@@ -98,6 +98,7 @@ function makeRun(id: string, status: HeartbeatRun["status"], createdAt: string, 
     stdoutExcerpt: null,
     stderrExcerpt: null,
     contextSnapshot: null,
+    acknowledgedAt: null,
     startedAt: new Date(createdAt),
     finishedAt: null,
     createdAt: new Date(createdAt),
@@ -140,6 +141,7 @@ function makeIssue(id: string, isUnreadForMe: boolean): Issue {
     labelIds: [],
     myLastTouchAt: new Date("2026-03-11T00:00:00.000Z"),
     lastExternalCommentAt: new Date("2026-03-11T01:00:00.000Z"),
+    prUrl: null,
     isUnreadForMe,
   };
 }
