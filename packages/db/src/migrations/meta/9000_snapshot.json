@@ -1,6 +1,6 @@
 {
-  "id": "5f8dd541-9e28-4a42-890b-fc4a301604ac",
-  "prevId": "bd8d9b8d-3012-4c58-bcfd-b3215c164f82",
+  "id": "a0009000-0000-0000-0000-000000009000",
+  "prevId": "8186209d-f7ec-4048-bd4f-c96530f45304",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -3374,6 +3374,13 @@
           "primaryKey": false,
           "notNull": true,
           "default": "now()"
+        },
+        "acknowledged_at": {
+          "name": "acknowledged_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
         }
       },
       "indexes": {
@@ -4632,6 +4639,12 @@
           "primaryKey": false,
           "notNull": false
         },
+        "execution_workspace_settings": {
+          "name": "execution_workspace_settings",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": false
+        },
         "started_at": {
           "name": "started_at",
           "type": "timestamp with time zone",
@@ -5746,6 +5759,12 @@
         "color": {
           "name": "color",
           "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "execution_workspace_policy": {
+          "name": "execution_workspace_policy",
+          "type": "jsonb",
           "primaryKey": false,
           "notNull": false
         },

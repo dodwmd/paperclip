@@ -1,6 +1,6 @@
 {
-  "id": "d4e5f6a7-b8c9-0123-defa-123456789012",
-  "prevId": "8186209d-f7ec-4048-bd4f-c96530f45304",
+  "id": "a0009001-0000-0000-0000-000000009001",
+  "prevId": "a0009000-0000-0000-0000-000000009000",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -1225,6 +1225,12 @@
           "primaryKey": false,
           "notNull": true,
           "default": "now()"
+        },
+        "mcp_servers": {
+          "name": "mcp_servers",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": false
         }
       },
       "indexes": {
@@ -3374,6 +3380,13 @@
           "primaryKey": false,
           "notNull": true,
           "default": "now()"
+        },
+        "acknowledged_at": {
+          "name": "acknowledged_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
         }
       },
       "indexes": {
@@ -4675,13 +4688,6 @@
           "primaryKey": false,
           "notNull": true,
           "default": "now()"
-        },
-        "pr_url": {
-          "name": "pr_url",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
         }
       },
       "indexes": {
