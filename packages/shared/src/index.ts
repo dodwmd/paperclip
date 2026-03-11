@@ -88,6 +88,7 @@ export type {
   CostEvent,
   CostSummary,
   CostByAgent,
+  CostByProject,
   HeartbeatRun,
   HeartbeatRunEvent,
   AgentRuntimeState,

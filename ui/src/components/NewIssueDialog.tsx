@@ -34,6 +34,8 @@ import {
   Tag,
   Calendar,
   Paperclip,
+  FileText,
+  X,
 } from "lucide-react";
 import { cn } from "../lib/utils";
 import { extractProviderIdWithFallback } from "../lib/model-utils";
@@ -183,6 +185,8 @@ export function NewIssueDialog() {
   const [assigneeUseProjectWorkspace, setAssigneeUseProjectWorkspace] = useState(true);
   const [expanded, setExpanded] = useState(false);
   const [dialogCompanyId, setDialogCompanyId] = useState<string | null>(null);
+  const [sessionTranscript, setSessionTranscript] = useState<string | null>(null);
+  const [sessionTranscriptLabel, setSessionTranscriptLabel] = useState<string | null>(null);
   const draftTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const effectiveCompanyId = dialogCompanyId ?? selectedCompanyId;
@@ -355,6 +359,8 @@ export function NewIssueDialog() {
       setAssigneeChrome(false);
       setAssigneeUseProjectWorkspace(true);
     }
+    setSessionTranscript(newIssueDefaults.sessionTranscript ?? null);
+    setSessionTranscriptLabel(newIssueDefaults.sessionTranscriptLabel ?? null);
   }, [newIssueOpen, newIssueDefaults]);
 
   useEffect(() => {
@@ -400,6 +406,8 @@ export function NewIssueDialog() {
     setExpanded(false);
     setDialogCompanyId(null);
     setCompanyOpen(false);
+    setSessionTranscript(null);
+    setSessionTranscriptLabel(null);
   }
 
   function handleCompanyChange(companyId: string) {
@@ -428,10 +436,14 @@ export function NewIssueDialog() {
       chrome: assigneeChrome,
       useProjectWorkspace: assigneeUseProjectWorkspace,
     });
+    const baseDescription = description.trim();
+    const fullDescription = sessionTranscript
+      ? (baseDescription ? `${baseDescription}\n\n` : "") + `<session-transcript>\n${sessionTranscript}\n</session-transcript>`
+      : baseDescription || undefined;
     createIssue.mutate({
       companyId: effectiveCompanyId,
       title: title.trim(),
-      description: description.trim() || undefined,
+      description: fullDescription,
       status,
       priority: priority || "medium",
       ...(assigneeId ? { assigneeAgentId: assigneeId } : {}),
@@ -905,6 +917,21 @@ export function NewIssueDialog() {
             <Tag className="h-3 w-3" />
             Labels
           </button>
+
+          {/* Session transcript chip */}
+          {sessionTranscript && (
+            <div className="inline-flex items-center gap-1 rounded-md border border-border bg-muted/30 px-2 py-1 text-xs text-muted-foreground">
+              <FileText className="h-3 w-3 shrink-0" />
+              <span className="truncate max-w-[160px]">{sessionTranscriptLabel ?? "session transcript"}</span>
+              <button
+                className="ml-0.5 hover:text-foreground transition-colors"
+                onClick={() => { setSessionTranscript(null); setSessionTranscriptLabel(null); }}
+                title="Remove transcript"
+              >
+                <X className="h-3 w-3" />
+              </button>
+            </div>
+          )}
 
           {/* Attach image chip */}
           <input

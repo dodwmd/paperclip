@@ -17,7 +17,7 @@ import { formatDate, cn, projectUrl } from "../lib/utils";
 import { timeAgo } from "../lib/timeAgo";
 import { Separator } from "@/components/ui/separator";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
-import { User, Hexagon, ArrowUpRight, Tag, Plus, Trash2 } from "lucide-react";
+import { User, Hexagon, ArrowUpRight, Tag, Plus, Trash2, Lock, LockOpen } from "lucide-react";
 import { AgentIcon } from "./AgentIconPicker";
 
 interface IssuePropertiesProps {
@@ -101,6 +101,14 @@ export function IssueProperties({ issue, onUpdate, inline }: IssuePropertiesProp
   const { selectedCompanyId } = useCompany();
   const queryClient = useQueryClient();
   const companyId = issue.companyId ?? selectedCompanyId;
+
+  const releaseLock = useMutation({
+    mutationFn: () => issuesApi.release(issue.id),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.issues.detail(issue.id) });
+      queryClient.invalidateQueries({ queryKey: queryKeys.issues.list(companyId!) });
+    },
+  });
   const [assigneeOpen, setAssigneeOpen] = useState(false);
   const [assigneeSearch, setAssigneeSearch] = useState("");
   const [projectOpen, setProjectOpen] = useState(false);
@@ -483,6 +491,27 @@ export function IssueProperties({ issue, onUpdate, inline }: IssuePropertiesProp
         >
           {assigneeContent}
         </PropertyPicker>
+
+        {issue.executionRunId && (
+          <PropertyRow label="Lock">
+            <Lock className="h-3.5 w-3.5 text-amber-500 shrink-0" />
+            <span className="text-xs text-muted-foreground truncate">
+              {issue.executionAgentNameKey ?? issue.executionRunId.slice(0, 8)}
+              {issue.executionLockedAt && (
+                <> · {timeAgo(issue.executionLockedAt)}</>
+              )}
+            </span>
+            <button
+              className="ml-auto inline-flex items-center gap-1 px-1.5 py-0.5 text-xs rounded border border-border hover:bg-accent/50 disabled:opacity-50 shrink-0"
+              disabled={releaseLock.isPending}
+              onClick={() => releaseLock.mutate()}
+              title="Release execution lock"
+            >
+              <LockOpen className="h-3 w-3" />
+              {releaseLock.isPending ? "Releasing…" : "Release"}
+            </button>
+          </PropertyRow>
+        )}
 
         <PropertyPicker
           inline={inline}

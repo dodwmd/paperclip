@@ -55,6 +55,7 @@ import {
   ArrowLeft,
   Settings,
   X,
+  FilePlus,
 } from "lucide-react";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { Collapsible, CollapsibleTrigger, CollapsibleContent } from "@/components/ui/collapsible";
@@ -2318,7 +2319,25 @@ function RunDetail({ run, agentRouteId, adapterType }: { run: HeartbeatRun; agen
 
 /* ---- Log Viewer ---- */
 
+function transcriptToText(transcript: TranscriptEntry[]): string {
+  return transcript.map((entry) => {
+    const time = new Date(entry.ts).toLocaleTimeString("en-US", { hour12: false });
+    if (entry.kind === "assistant") return `[${time}] assistant: ${entry.text}`;
+    if (entry.kind === "thinking") return `[${time}] thinking: ${entry.text}`;
+    if (entry.kind === "user") return `[${time}] user: ${entry.text}`;
+    if (entry.kind === "tool_call") return `[${time}] tool_call: ${entry.name}(${JSON.stringify(entry.input)})`;
+    if (entry.kind === "tool_result") return `[${time}] tool_result(${entry.toolUseId}): ${entry.content}`;
+    if (entry.kind === "init") return `[${time}] init: model=${entry.model} session=${entry.sessionId}`;
+    if (entry.kind === "result") return `[${time}] result: ${entry.text} (cost=$${entry.costUsd.toFixed(4)})`;
+    if (entry.kind === "stderr") return `[${time}] stderr: ${entry.text}`;
+    if (entry.kind === "system") return `[${time}] system: ${entry.text}`;
+    if (entry.kind === "stdout") return `[${time}] stdout: ${entry.text}`;
+    return "";
+  }).filter(Boolean).join("\n");
+}
+
 function LogViewer({ run, adapterType }: { run: HeartbeatRun; adapterType: string }) {
+  const { openNewIssue } = useDialog();
   const [events, setEvents] = useState<HeartbeatRunEvent[]>([]);
   const [logLines, setLogLines] = useState<Array<{ ts: string; stream: "stdout" | "stderr" | "system"; chunk: string }>>([]);
   const [loading, setLoading] = useState(true);
@@ -2327,6 +2346,7 @@ function LogViewer({ run, adapterType }: { run: HeartbeatRun; adapterType: strin
   const [logOffset, setLogOffset] = useState(0);
   const [isFollowing, setIsFollowing] = useState(false);
   const [isStreamingConnected, setIsStreamingConnected] = useState(false);
+  const [copied, setCopied] = useState(false);
   const logEndRef = useRef<HTMLDivElement>(null);
   const pendingLogLineRef = useRef("");
   const scrollContainerRef = useRef<ScrollContainer | null>(null);
@@ -2772,6 +2792,39 @@ function LogViewer({ run, adapterType }: { run: HeartbeatRun; adapterType: strin
           Transcript ({transcript.length})
         </span>
         <div className="flex items-center gap-2">
+          {transcript.length > 0 && (
+            <>
+              <Button
+                variant="ghost"
+                size="xs"
+                onClick={() => {
+                  const text = transcriptToText(transcript);
+                  navigator.clipboard.writeText(text).then(() => {
+                    setCopied(true);
+                    setTimeout(() => setCopied(false), 2000);
+                  });
+                }}
+              >
+                <Copy className="h-3 w-3 mr-1" />
+                {copied ? "Copied!" : "Copy"}
+              </Button>
+              <Button
+                variant="ghost"
+                size="xs"
+                onClick={() => {
+                  const text = transcriptToText(transcript);
+                  const shortId = run.id.slice(0, 8);
+                  openNewIssue({
+                    sessionTranscript: text,
+                    sessionTranscriptLabel: `run ${shortId} transcript`,
+                  });
+                }}
+              >
+                <FilePlus className="h-3 w-3 mr-1" />
+                New Issue
+              </Button>
+            </>
+          )}
           {isLive && !isFollowing && (
             <Button
               variant="ghost"

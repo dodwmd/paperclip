@@ -7,6 +7,8 @@ interface NewIssueDefaults {
   assigneeAgentId?: string;
   title?: string;
   description?: string;
+  sessionTranscript?: string;
+  sessionTranscriptLabel?: string;
 }
 
 interface NewGoalDefaults {

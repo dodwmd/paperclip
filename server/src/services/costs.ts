@@ -127,6 +127,8 @@ export function costService(db: Db) {
       const runRows = await db
         .select({
           agentId: heartbeatRuns.agentId,
+          cachedInputTokens:
+            sql<number>`coalesce(sum(coalesce((${heartbeatRuns.usageJson} ->> 'cachedInputTokens')::int, 0)), 0)::int`,
           apiRunCount:
             sql<number>`coalesce(sum(case when coalesce((${heartbeatRuns.usageJson} ->> 'billingType'), 'unknown') = 'api' then 1 else 0 end), 0)::int`,
           subscriptionRunCount:
@@ -145,6 +147,7 @@ export function costService(db: Db) {
         const runRow = runRowsByAgent.get(row.agentId);
         return {
           ...row,
+          cachedInputTokens: runRow?.cachedInputTokens ?? 0,
           apiRunCount: runRow?.apiRunCount ?? 0,
           subscriptionRunCount: runRow?.subscriptionRunCount ?? 0,
           subscriptionInputTokens: runRow?.subscriptionInputTokens ?? 0,
@@ -192,6 +195,7 @@ export function costService(db: Db) {
           costCents: costCentsExpr,
           inputTokens: sql<number>`coalesce(sum(coalesce((${heartbeatRuns.usageJson} ->> 'inputTokens')::int, 0)), 0)::int`,
           outputTokens: sql<number>`coalesce(sum(coalesce((${heartbeatRuns.usageJson} ->> 'outputTokens')::int, 0)), 0)::int`,
+          cachedInputTokens: sql<number>`coalesce(sum(coalesce((${heartbeatRuns.usageJson} ->> 'cachedInputTokens')::int, 0)), 0)::int`,
         })
         .from(runProjectLinks)
         .innerJoin(heartbeatRuns, eq(runProjectLinks.runId, heartbeatRuns.id))

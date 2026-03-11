@@ -197,6 +197,11 @@ export function Costs() {
                           <span className="text-xs text-muted-foreground block">
                             in {formatTokens(row.inputTokens)} / out {formatTokens(row.outputTokens)} tok
                           </span>
+                          {row.cachedInputTokens > 0 && (
+                            <span className="text-xs text-muted-foreground block">
+                              cached {formatTokens(row.cachedInputTokens)} tok
+                            </span>
+                          )}
                           {(row.apiRunCount > 0 || row.subscriptionRunCount > 0) && (
                             <span className="text-xs text-muted-foreground block">
                               {row.apiRunCount > 0 ? `api runs: ${row.apiRunCount}` : null}
@@ -229,7 +234,17 @@ export function Costs() {
                         <span className="truncate">
                           {row.projectName ?? row.projectId ?? "Unattributed"}
                         </span>
-                        <span className="font-medium">{formatCents(row.costCents)}</span>
+                        <div className="text-right shrink-0 ml-2">
+                          <span className="font-medium block">{formatCents(row.costCents)}</span>
+                          <span className="text-xs text-muted-foreground block">
+                            in {formatTokens(row.inputTokens)} / out {formatTokens(row.outputTokens)} tok
+                          </span>
+                          {row.cachedInputTokens > 0 && (
+                            <span className="text-xs text-muted-foreground block">
+                              cached {formatTokens(row.cachedInputTokens)} tok
+                            </span>
+                          )}
+                        </div>
                       </div>
                     ))}
                   </div>
