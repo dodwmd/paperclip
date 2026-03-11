@@ -70,7 +70,9 @@ export function getLatestFailedRunsByAgent(runs: HeartbeatRun[]): HeartbeatRun[]
     }
   }
 
-  return Array.from(latestByAgent.values()).filter((run) => FAILED_RUN_STATUSES.has(run.status));
+  return Array.from(latestByAgent.values()).filter(
+    (run) => FAILED_RUN_STATUSES.has(run.status) && !run.acknowledgedAt,
+  );
 }
 
 export function normalizeTimestamp(value: string | Date | null | undefined): number {

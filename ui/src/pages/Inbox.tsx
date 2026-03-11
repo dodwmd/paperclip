@@ -71,33 +71,6 @@ const RUN_SOURCE_LABELS: Record<string, string> = {
   automation: "Automation",
 };
 
-function getStaleIssues(issues: Issue[]): Issue[] {
-  const now = Date.now();
-  return issues
-    .filter(
-      (i) =>
-        ["in_progress", "todo"].includes(i.status) &&
-        now - new Date(i.updatedAt).getTime() > STALE_THRESHOLD_MS,
-    )
-    .sort((a, b) => new Date(a.updatedAt).getTime() - new Date(b.updatedAt).getTime());
-}
-
-function getLatestFailedRunsByAgent(runs: HeartbeatRun[]): HeartbeatRun[] {
-  const sorted = [...runs].sort(
-    (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
-  );
-  const latestByAgent = new Map<string, HeartbeatRun>();
-
-  for (const run of sorted) {
-    if (!latestByAgent.has(run.agentId)) {
-      latestByAgent.set(run.agentId, run);
-    }
-  }
-
-  return Array.from(latestByAgent.values()).filter(
-    (run) => FAILED_RUN_STATUSES.has(run.status) && !run.acknowledgedAt,
-  );
-}
 
 
 function firstNonEmptyLine(value: string | null | undefined): string | null {
