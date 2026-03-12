@@ -6,7 +6,7 @@
  */
 import express, { type Request } from "express";
 import request from "supertest";
-import { describe, expect, it, vi, beforeEach } from "vitest";
+import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
 import { errorHandler } from "../middleware/error-handler.js";
 
 // Use vi.hoisted() to create stable mock references that are available
@@ -221,6 +221,11 @@ beforeEach(() => {
 // ── PATCH /issues/:id — transition enforcement ─────────────────────────────
 
 describe("PATCH /issues/:id — Kanban workflow enforcement", () => {
+  afterEach(() => {
+    // Safety net: ensure KANBAN_ENFORCEMENT_ENABLED is always cleaned up even if
+    // a test throws before its inline cleanup runs.
+    delete process.env.KANBAN_ENFORCEMENT_ENABLED;
+  });
   it("engineer without prUrl to in_review → 422", async () => {
     mockIssueSvc.getById.mockResolvedValue({ ...baseIssue, status: "in_progress", prUrl: null });
 

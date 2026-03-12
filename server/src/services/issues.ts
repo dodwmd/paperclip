@@ -24,6 +24,10 @@ import {
   parseProjectExecutionWorkspacePolicy,
 } from "./execution-workspace-policy.js";
 
+// BFS cycle-detection depth limit for addBlocker.
+// The value 10 was chosen as a practical upper bound well above typical real-world chain depths.
+const MAX_DEPENDENCY_DEPTH = 10;
+
 const ROLE_MENTION_MAP: Record<string, string> = {
   pm: "pm",
   productowner: "pm",
@@ -1574,10 +1578,15 @@ export function issueService(db: Db) {
         throw unprocessable("Blocker must belong to the same company");
       }
 
-      // Circular dependency check (up to 10 hops)
+      // BFS cycle detection: starting from blockerId, traverse UP the blocking chain
+      // (what blocks the blocker, and so on) up to MAX_DEPENDENCY_DEPTH levels.
+      // If we encounter dependentId within those hops, adding this edge would create a cycle — reject.
+      // Chains deeper than MAX_DEPENDENCY_DEPTH are accepted; very deep chains are rare in practice
+      // and the cost of a full traversal is not worth the edge-case safety.
+      // The value 10 was chosen as a practical upper bound well above typical real-world chain depths.
       const visited = new Set<string>([dependentId]);
       let frontier = [blockerId];
-      for (let depth = 0; depth < 10 && frontier.length > 0; depth++) {
+      for (let depth = 0; depth < MAX_DEPENDENCY_DEPTH && frontier.length > 0; depth++) {
         if (frontier.some((id) => visited.has(id))) {
           throw unprocessable("Adding this dependency would create a circular chain");
         }

@@ -284,6 +284,40 @@ curl -s "$PAPERCLIP_API_URL/api/companies/$PAPERCLIP_COMPANY_ID/secrets/sonarr-a
 
 Treat retrieved values as sensitive — do not log them or include them in comments.
 
+## Defensive API Calls (curl + jq)
+
+All Paperclip API responses are JSON. On errors the API returns `{"error": "...", ...}` — **not** an array or the expected object shape. Piping directly to `jq '.[] | .field'` without checking will produce the cryptic `Cannot index string with string "field"` error, which is just jq seeing an error object instead of the expected type.
+
+**Always capture the response first, check for errors, then parse:**
+
+```bash
+# Safe pattern: capture → check → parse
+RESP=$(curl -s -w '\n%{http_code}' \
+  -H "Authorization: Bearer $PAPERCLIP_API_KEY" \
+  "$PAPERCLIP_API_URL/api/companies/$PAPERCLIP_COMPANY_ID/issues?assigneeAgentId=$PAPERCLIP_AGENT_ID&status=todo,in_progress,blocked")
+HTTP_CODE=$(echo "$RESP" | tail -1)
+BODY=$(echo "$RESP" | head -n -1)
+
+if [ "$HTTP_CODE" -ge 400 ]; then
+  echo "API error $HTTP_CODE: $BODY"
+  exit 1
+fi
+
+# Now safe to parse — we know the status is 2xx
+echo "$BODY" | jq '.[] | {id, identifier, status, title}'
+```
+
+**For one-liners where you're confident the route exists**, guard against error objects inline:
+
+```bash
+# Inline guard: if it has .error, print it; otherwise parse normally
+curl -s ... | jq 'if .error then error(.error) elif type == "array" then .[] | {id, status} else {id, status} end'
+```
+
+**Never use `head -N` to truncate jq array output** — pipe through jq's `limit/2` or add `| head -N` after the final jq expression, not between curl and jq.
+
+**URL-encode query parameters** when values contain special characters. Multiple status values must be comma-separated (no spaces): `?status=todo,in_progress,blocked`.
+
 ## Key Endpoints (Quick Reference)
 
 | Action                                | Endpoint                                                                                   |
