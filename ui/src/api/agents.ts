@@ -149,8 +149,16 @@ export const agentsApi = {
   updateInstructionFile: (id: string, filename: string, content: string, companyId?: string) =>
     api.put<{ ok: true; path: string }>(agentPath(id, companyId, `/instruction-files/${encodeURIComponent(filename)}`), { content }),
   syncPersona: (id: string, companyId?: string) =>
-    api.post<{ ok: boolean; syncedAt?: string; filesSynced?: string[]; error?: string }>(
-      agentPath(id, companyId, "/sync-persona"),
-      {},
+    api.post<{
+      ok: boolean;
+      syncedAt?: string;
+      filesSynced?: string[];
+      fileDetails?: { name: string; status: "changed" | "unchanged" | "error"; error?: string }[];
+      sha?: string | null;
+      error?: string;
+    }>(agentPath(id, companyId, "/sync-persona"), {}),
+  checkPersonaStatus: (id: string, companyId?: string) =>
+    api.get<{ remoteSha: string | null; localSha: string | null; inSync: boolean; permissionError: boolean }>(
+      agentPath(id, companyId, "/persona-status"),
     ),
 };

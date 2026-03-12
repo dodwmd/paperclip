@@ -31,6 +31,7 @@ export interface Agent {
   personaGitUrl: string | null;
   personaLastSyncedAt: Date | null;
   personaLastSyncError: string | null;
+  personaGitSha: string | null;
   createdAt: Date;
   updatedAt: Date;
 }

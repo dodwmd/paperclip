@@ -1011,12 +1011,24 @@ function PersonaRepoSection({
   companyId?: string;
 }) {
   const queryClient = useQueryClient();
-  const [urlDraft, setUrlDraft] = useState<string | null>(null);
-  const [syncResult, setSyncResult] = useState<{ ok: boolean; filesSynced?: string[]; error?: string } | null>(null);
+  const [urlDraft, setUrlDraft] = useState<string>("");
+  const [isEditing, setIsEditing] = useState(false);
+  const [syncResult, setSyncResult] = useState<{
+    ok: boolean;
+    filesSynced?: string[];
+    fileDetails?: { name: string; status: "changed" | "unchanged" | "error"; error?: string }[];
+    sha?: string | null;
+    error?: string;
+  } | null>(null);
 
   const currentUrl = agent.personaGitUrl ?? "";
-  const displayUrl = urlDraft ?? currentUrl;
-  const isUrlDirty = urlDraft !== null && urlDraft !== currentUrl;
+
+  const { data: personaStatus } = useQuery({
+    queryKey: ["persona-status", agent.id],
+    queryFn: () => agentsApi.checkPersonaStatus(agent.id, companyId),
+    enabled: !!currentUrl && !isEditing,
+    staleTime: 60_000,
+  });
 
   const saveUrl = useMutation({
     mutationFn: (url: string | null) =>
@@ -1024,7 +1036,8 @@ function PersonaRepoSection({
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: queryKeys.agents.detail(agent.id) });
       queryClient.invalidateQueries({ queryKey: queryKeys.agents.detail(agent.urlKey) });
-      setUrlDraft(null);
+      queryClient.invalidateQueries({ queryKey: ["persona-status", agent.id] });
+      setIsEditing(false);
     },
   });
 
@@ -1034,7 +1047,7 @@ function PersonaRepoSection({
       setSyncResult(data);
       queryClient.invalidateQueries({ queryKey: queryKeys.agents.detail(agent.id) });
       queryClient.invalidateQueries({ queryKey: queryKeys.agents.detail(agent.urlKey) });
-      // Refresh instruction file editors
+      queryClient.invalidateQueries({ queryKey: ["persona-status", agent.id] });
       for (const filename of ["AGENTS.md", "HEARTBEAT.md", "SOUL.md", "TOOLS.md"] as const) {
         queryClient.invalidateQueries({ queryKey: queryKeys.agents.instructionFile(agent.id, filename) });
       }
@@ -1044,6 +1057,17 @@ function PersonaRepoSection({
     },
   });
 
+  // Determine status colour for the URL badge
+  const statusColor = (() => {
+    if (!currentUrl) return null;
+    if (agent.personaLastSyncError || personaStatus?.permissionError) return "red";
+    if (personaStatus && !personaStatus.inSync) return "yellow";
+    if (personaStatus?.inSync) return "green";
+    return null;
+  })();
+
+  const shortSha = (agent.personaGitSha ?? personaStatus?.localSha ?? "").slice(0, 6);
+
   return (
     <div>
       <h3 className="text-sm font-medium mb-3">Persona Repository</h3>
@@ -1052,46 +1076,101 @@ function PersonaRepoSection({
           <p className="text-xs text-muted-foreground">
             GitHub tree URL containing the agent's persona files (SOUL.md, AGENTS.md, HEARTBEAT.md, TOOLS.md).
           </p>
-          <div className="flex items-center gap-2">
-            <Input
-              className="text-xs font-mono h-8 flex-1"
-              placeholder="https://github.com/owner/repo/tree/branch/agent-dir"
-              value={displayUrl}
-              onChange={(e) => setUrlDraft(e.target.value)}
-            />
-            {isUrlDirty && (
-              <>
-                <Button
-                  size="sm"
-                  variant="outline"
-                  className="h-8 px-2 text-xs shrink-0"
-                  onClick={() => setUrlDraft(null)}
-                  disabled={saveUrl.isPending}
-                >
-                  Cancel
-                </Button>
-                <Button
-                  size="sm"
-                  className="h-8 px-2 text-xs shrink-0"
-                  onClick={() => saveUrl.mutate(displayUrl)}
-                  disabled={saveUrl.isPending}
-                >
-                  {saveUrl.isPending ? "Saving…" : "Save"}
-                </Button>
-              </>
-            )}
-            {!isUrlDirty && currentUrl && (
+
+          {currentUrl && !isEditing ? (
+            /* Read-only display with status indicator */
+            <div className="flex items-center gap-2">
+              <div
+                className={cn(
+                  "flex items-center gap-1.5 flex-1 rounded-md border px-2 py-1.5 text-xs font-mono bg-muted/40 min-w-0",
+                  statusColor === "green" && "border-green-500/50",
+                  statusColor === "yellow" && "border-yellow-500/50",
+                  statusColor === "red" && "border-destructive/50",
+                )}
+              >
+                {statusColor && (
+                  <span
+                    className={cn(
+                      "inline-block w-2 h-2 rounded-full shrink-0",
+                      statusColor === "green" && "bg-green-500",
+                      statusColor === "yellow" && "bg-yellow-500",
+                      statusColor === "red" && "bg-red-500",
+                    )}
+                  />
+                )}
+                <span className="truncate text-muted-foreground">{currentUrl}</span>
+                {shortSha && (
+                  <span
+                    className={cn(
+                      "shrink-0 rounded px-1 py-0.5 text-[10px] font-mono",
+                      statusColor === "green" && "bg-green-500/15 text-green-700 dark:text-green-400",
+                      statusColor === "yellow" && "bg-yellow-500/15 text-yellow-700 dark:text-yellow-400",
+                      statusColor === "red" && "bg-red-500/15 text-red-700 dark:text-red-400",
+                      !statusColor && "bg-muted text-muted-foreground",
+                    )}
+                  >
+                    {shortSha}
+                  </span>
+                )}
+              </div>
+              <Button
+                size="sm"
+                variant="ghost"
+                className="h-7 w-7 p-0 shrink-0 text-muted-foreground hover:text-foreground"
+                title="Remove repository URL"
+                onClick={() => {
+                  setSyncResult(null);
+                  saveUrl.mutate(null);
+                }}
+                disabled={saveUrl.isPending}
+              >
+                <X className="h-3.5 w-3.5" />
+              </Button>
               <Button
                 size="sm"
                 variant="outline"
-                className="h-8 px-2 text-xs shrink-0"
+                className="h-7 px-2 text-xs shrink-0"
                 onClick={() => { setSyncResult(null); sync.mutate(); }}
                 disabled={sync.isPending}
               >
                 {sync.isPending ? <><Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" />Syncing…</> : "Sync Now"}
               </Button>
-            )}
-          </div>
+            </div>
+          ) : (
+            /* Editable input for new URL */
+            <div className="flex items-center gap-2">
+              <Input
+                className="text-xs font-mono h-8 flex-1"
+                placeholder="https://github.com/owner/repo/tree/branch/agent-dir"
+                value={isEditing ? urlDraft : ""}
+                autoFocus={isEditing}
+                onChange={(e) => setUrlDraft(e.target.value)}
+                onFocus={() => { if (!isEditing) { setIsEditing(true); setUrlDraft(""); } }}
+              />
+              {isEditing && (
+                <>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="h-8 px-2 text-xs shrink-0"
+                    onClick={() => { setIsEditing(false); setUrlDraft(""); }}
+                    disabled={saveUrl.isPending}
+                  >
+                    Cancel
+                  </Button>
+                  <Button
+                    size="sm"
+                    className="h-8 px-2 text-xs shrink-0"
+                    onClick={() => saveUrl.mutate(urlDraft)}
+                    disabled={saveUrl.isPending || !urlDraft.trim()}
+                  >
+                    {saveUrl.isPending ? "Saving…" : "Save"}
+                  </Button>
+                </>
+              )}
+            </div>
+          )}
+
           {saveUrl.isError && (
             <p className="text-xs text-destructive">
               {saveUrl.error instanceof Error ? saveUrl.error.message : "Save failed"}
@@ -1099,25 +1178,46 @@ function PersonaRepoSection({
           )}
         </div>
 
+        {/* Status messages */}
         {(agent.personaLastSyncedAt || agent.personaLastSyncError) && !syncResult && (
           <p className="text-xs text-muted-foreground">
             {agent.personaLastSyncError
               ? <span className="text-destructive">Sync failed: {agent.personaLastSyncError}</span>
               : agent.personaLastSyncedAt
-              ? <>Last synced: {relativeTime(new Date(agent.personaLastSyncedAt))}</>
+              ? <>Last synced: {relativeTime(new Date(agent.personaLastSyncedAt))}{personaStatus && !personaStatus.inSync && !personaStatus.permissionError && <span className="text-yellow-600 dark:text-yellow-400 ml-1">· new version available</span>}</>
               : null}
           </p>
         )}
 
         {syncResult && (
-          <p className="text-xs">
-            {syncResult.ok
-              ? <span className="text-green-600 dark:text-green-400">
-                  Synced {syncResult.filesSynced?.length ?? 0} file{syncResult.filesSynced?.length !== 1 ? "s" : ""}: {syncResult.filesSynced?.join(", ")}
+          <div className="text-xs space-y-1">
+            {syncResult.ok ? (
+              syncResult.fileDetails && syncResult.fileDetails.length > 0 ? (
+                <div className="flex flex-wrap gap-x-3 gap-y-0.5">
+                  {syncResult.fileDetails.map((f) => (
+                    <span
+                      key={f.name}
+                      title={f.error}
+                      className={cn(
+                        "font-mono",
+                        f.status === "changed" && "text-yellow-600 dark:text-yellow-400",
+                        f.status === "unchanged" && "text-green-600 dark:text-green-400",
+                        f.status === "error" && "text-destructive",
+                      )}
+                    >
+                      {f.name}
+                    </span>
+                  ))}
+                </div>
+              ) : (
+                <span className="text-green-600 dark:text-green-400">
+                  Synced {syncResult.filesSynced?.length ?? 0} file{syncResult.filesSynced?.length !== 1 ? "s" : ""}
                 </span>
-              : <span className="text-destructive">Sync failed: {syncResult.error}</span>
-            }
-          </p>
+              )
+            ) : (
+              <span className="text-destructive">Sync failed: {syncResult.error}</span>
+            )}
+          </div>
         )}
       </div>
     </div>

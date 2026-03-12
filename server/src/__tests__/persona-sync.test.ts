@@ -366,6 +366,12 @@ describe("syncAgentPersona() — direct unit tests", () => {
         status: 200,
         json: async () => directoryListing,
       } as unknown as Response)
+      // fetchLatestPathSha (commits API) — called concurrently with directory listing
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        json: async () => [{ sha: "abc1234567890" }],
+      } as unknown as Response)
       .mockResolvedValueOnce({
         ok: true,
         status: 200,
@@ -503,6 +509,12 @@ describe("syncAgentPersona() — direct unit tests", () => {
         ok: true,
         status: 200,
         json: async () => directoryListing,
+      } as unknown as Response)
+      // fetchLatestPathSha (commits API) — called concurrently with directory listing
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        json: async () => [{ sha: "abc1234567890" }],
       } as unknown as Response)
       .mockResolvedValueOnce({
         ok: true,

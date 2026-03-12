@@ -232,6 +232,13 @@
       "when": 1741737600000,
       "tag": "9004_issue_dependencies",
       "breakpoints": true
+    },
+    {
+      "idx": 9005,
+      "version": "7",
+      "when": 1741824000000,
+      "tag": "9005_agent_persona_git_sha",
+      "breakpoints": true
     }
   ]
 }

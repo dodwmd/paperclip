@@ -34,6 +34,7 @@ export const agents = pgTable(
     personaGitUrl: text("persona_git_url"),
     personaLastSyncedAt: timestamp("persona_last_synced_at", { withTimezone: true }),
     personaLastSyncError: text("persona_last_sync_error"),
+    personaGitSha: text("persona_git_sha"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },
