@@ -36,6 +36,13 @@ export interface IssueAncestor {
   goal: IssueAncestorGoal | null;
 }
 
+export interface IssueDependencyRef {
+  id: string;
+  identifier: string | null;
+  title: string;
+  status: IssueStatus;
+}
+
 export interface IssueLabel {
   id: string;
   companyId: string;
@@ -80,6 +87,8 @@ export interface Issue {
   completedAt: Date | null;
   cancelledAt: Date | null;
   hiddenAt: Date | null;
+  blockedBy?: IssueDependencyRef[];
+  blocks?: IssueDependencyRef[];
   labelIds?: string[];
   labels?: IssueLabel[];
   project?: Project | null;

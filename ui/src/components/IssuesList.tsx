@@ -626,6 +626,20 @@ export function IssuesList({
                       <span className="text-xs text-muted-foreground font-mono shrink-0">
                         {issue.identifier ?? issue.id.slice(0, 8)}
                       </span>
+                      {(() => {
+                        const activeBlockers = (issue.blockedBy ?? []).filter(
+                          (b) => b.status !== "done" && b.status !== "cancelled",
+                        );
+                        if (activeBlockers.length === 0) return null;
+                        return (
+                          <span
+                            title={activeBlockers.map((b) => b.identifier ?? b.id.slice(0, 8)).join(", ")}
+                            className="inline-flex items-center gap-0.5 rounded-full bg-destructive/15 text-destructive px-1.5 py-0.5 text-[10px] font-medium shrink-0"
+                          >
+                            ⊘ {activeBlockers.length}
+                          </span>
+                        );
+                      })()}
                       {liveIssueIds?.has(issue.id) && (
                         <span className="inline-flex items-center gap-1 sm:gap-1.5 px-1.5 sm:px-2 py-0.5 rounded-full bg-blue-500/10">
                           <span className="relative flex h-2 w-2">

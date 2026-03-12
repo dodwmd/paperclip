@@ -37,6 +37,10 @@ const {
     findMentionedAgents: vi.fn(),
     findMentionedProjectIds: vi.fn(),
     getAncestors: vi.fn(),
+    getDependencies: vi.fn(),
+    autoUnblockDependents: vi.fn(),
+    addBlocker: vi.fn(),
+    removeBlocker: vi.fn(),
   };
   const mockAgentSvc = { getById: vi.fn(), update: vi.fn() };
   const mockLogActivity = vi.fn();
@@ -203,6 +207,8 @@ beforeEach(() => {
   mockIssueSvc.findMentionedAgents.mockResolvedValue([]);
   mockIssueSvc.findMentionedProjectIds.mockResolvedValue([]);
   mockIssueSvc.getAncestors.mockResolvedValue([]);
+  mockIssueSvc.getDependencies.mockResolvedValue({ blockedBy: [], blocks: [] });
+  mockIssueSvc.autoUnblockDependents.mockResolvedValue([]);
   mockIssueSvc.listAttachments.mockResolvedValue([]);
   mockIssueSvc.listComments.mockResolvedValue([]);
   mockAgentSvc.getById.mockResolvedValue({ ...baseAgent });

@@ -2,6 +2,7 @@ import { Router, type Request, type Response } from "express";
 import multer from "multer";
 import type { Db } from "@paperclipai/db";
 import {
+  addIssueDependencySchema,
   addIssueCommentSchema,
   createIssueAttachmentMetadataSchema,
   createIssueLabelSchema,
@@ -378,16 +379,25 @@ export function issueRoutes(db: Db, storage: StorageService) {
       return;
     }
     assertCompanyAccess(req, issue.companyId);
-    const [ancestors, project, goal, mentionedProjectIds] = await Promise.all([
+    const [ancestors, project, goal, mentionedProjectIds, deps] = await Promise.all([
       svc.getAncestors(issue.id),
       issue.projectId ? projectsSvc.getById(issue.projectId) : null,
       issue.goalId ? goalsSvc.getById(issue.goalId) : null,
       svc.findMentionedProjectIds(issue.id),
+      svc.getDependencies(issue.id),
     ]);
     const mentionedProjects = mentionedProjectIds.length > 0
       ? await projectsSvc.listByIds(issue.companyId, mentionedProjectIds)
       : [];
-    res.json({ ...issue, ancestors, project: project ?? null, goal: goal ?? null, mentionedProjects });
+    res.json({
+      ...issue,
+      ancestors,
+      project: project ?? null,
+      goal: goal ?? null,
+      mentionedProjects,
+      blockedBy: deps.blockedBy,
+      blocks: deps.blocks,
+    });
   });
 
   /**
@@ -544,6 +554,85 @@ export function issueRoutes(db: Db, storage: StorageService) {
     });
 
     res.json({ ok: true });
+  });
+
+  // ── Issue Dependencies ────────────────────────────────────────────────────
+
+  router.get("/issues/:id/blockers", async (req, res) => {
+    const id = req.params.id as string;
+    const issue = await svc.getById(id);
+    if (!issue) {
+      res.status(404).json({ error: "Issue not found" });
+      return;
+    }
+    assertCompanyAccess(req, issue.companyId);
+    const deps = await svc.getDependencies(id);
+    res.json(deps);
+  });
+
+  router.post("/issues/:id/blockers", validate(addIssueDependencySchema), async (req, res) => {
+    const id = req.params.id as string;
+    const issue = await svc.getById(id);
+    if (!issue) {
+      res.status(404).json({ error: "Issue not found" });
+      return;
+    }
+    assertCompanyAccess(req, issue.companyId);
+
+    const actor = getActorInfo(req);
+    await svc.addBlocker(id, req.body.blockerId, issue.companyId, {
+      agentId: actor.agentId,
+      userId: actor.actorType === "user" ? actor.actorId : null,
+    });
+
+    await logActivity(db, {
+      companyId: issue.companyId,
+      actorType: actor.actorType,
+      actorId: actor.actorId,
+      agentId: actor.agentId,
+      runId: actor.runId,
+      action: "issue.blocker_added",
+      entityType: "issue",
+      entityId: issue.id,
+      details: { blockerId: req.body.blockerId, identifier: issue.identifier },
+    });
+
+    const deps = await svc.getDependencies(id);
+    res.status(201).json(deps);
+  });
+
+  router.delete("/issues/:id/blockers/:blockerId", async (req, res) => {
+    const id = req.params.id as string;
+    const blockerId = req.params.blockerId as string;
+    const issue = await svc.getById(id);
+    if (!issue) {
+      res.status(404).json({ error: "Issue not found" });
+      return;
+    }
+    assertCompanyAccess(req, issue.companyId);
+
+    const result = await svc.removeBlocker(id, blockerId);
+
+    if (!result.deleted) {
+      res.status(404).json({ error: "Dependency relationship not found" });
+      return;
+    }
+
+    const actor = getActorInfo(req);
+    await logActivity(db, {
+      companyId: issue.companyId,
+      actorType: actor.actorType,
+      actorId: actor.actorId,
+      agentId: actor.agentId,
+      runId: actor.runId,
+      action: "issue.blocker_removed",
+      entityType: "issue",
+      entityId: issue.id,
+      details: { blockerId, identifier: issue.identifier },
+    });
+
+    const deps = await svc.getDependencies(id);
+    res.json(deps);
   });
 
   router.post("/companies/:companyId/issues", validate(createIssueSchema), async (req, res) => {
@@ -767,6 +856,16 @@ export function issueRoutes(db: Db, storage: StorageService) {
         _previous: hasFieldChanges ? previous : undefined,
       },
     });
+
+    // Auto-unblock dependents when issue transitions to done/cancelled
+    if (
+      statusChanging &&
+      (issue.status === "done" || issue.status === "cancelled")
+    ) {
+      void svc.autoUnblockDependents(issue.id).catch((err) =>
+        logger.warn({ err, issueId: issue.id }, "failed to auto-unblock dependents"),
+      );
+    }
 
     let comment = null;
     if (commentBody) {

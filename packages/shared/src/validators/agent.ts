@@ -38,6 +38,7 @@ export const createAgentSchema = z.object({
   permissions: agentPermissionsSchema.optional(),
   metadata: z.record(z.unknown()).optional().nullable(),
   mcpServers: z.record(z.unknown()).optional().nullable(),
+  personaGitUrl: z.string().url().nullable().optional(),
 });
 
 export type CreateAgent = z.infer<typeof createAgentSchema>;

@@ -148,4 +148,9 @@ export const agentsApi = {
     api.get<{ content: string | null }>(agentPath(id, companyId, `/instruction-files/${encodeURIComponent(filename)}`)),
   updateInstructionFile: (id: string, filename: string, content: string, companyId?: string) =>
     api.put<{ ok: true; path: string }>(agentPath(id, companyId, `/instruction-files/${encodeURIComponent(filename)}`), { content }),
+  syncPersona: (id: string, companyId?: string) =>
+    api.post<{ ok: boolean; syncedAt?: string; filesSynced?: string[]; error?: string }>(
+      agentPath(id, companyId, "/sync-persona"),
+      {},
+    ),
 };

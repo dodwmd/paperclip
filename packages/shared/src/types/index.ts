@@ -21,6 +21,7 @@ export type {
 } from "./workspace-runtime.js";
 export type {
   Issue,
+  IssueDependencyRef,
   IssueAssigneeAdapterOverrides,
   IssueComment,
   IssueAncestor,

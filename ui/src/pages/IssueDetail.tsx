@@ -38,15 +38,25 @@ import {
   ChevronRight,
   EyeOff,
   Hexagon,
+  Link2,
   ListTree,
   MessageSquare,
   MoreHorizontal,
   Paperclip,
   SlidersHorizontal,
   Trash2,
+  X,
 } from "lucide-react";
-import type { ActivityEvent } from "@paperclipai/shared";
+import type { ActivityEvent, IssueDependencyRef } from "@paperclipai/shared";
 import type { Agent, IssueAttachment } from "@paperclipai/shared";
+import {
+  Command,
+  CommandEmpty,
+  CommandGroup,
+  CommandInput,
+  CommandItem,
+  CommandList,
+} from "@/components/ui/command";
 
 type CommentReassignment = {
   assigneeAgentId: string | null;
@@ -134,6 +144,47 @@ function formatAction(action: string, details?: Record<string, unknown> | null):
   return ACTION_LABELS[action] ?? action.replace(/[._]/g, " ");
 }
 
+function DependencyRow({
+  dep,
+  onRemove,
+  removeDisabled,
+  locationState,
+}: {
+  dep: IssueDependencyRef;
+  onRemove?: () => void;
+  removeDisabled?: boolean;
+  locationState?: unknown;
+}) {
+  const isDone = dep.status === "done" || dep.status === "cancelled";
+  return (
+    <div className="flex items-center justify-between px-3 py-2 text-sm">
+      <Link
+        to={`/issues/${dep.identifier ?? dep.id}`}
+        state={locationState}
+        className="flex items-center gap-2 min-w-0 hover:underline"
+      >
+        <StatusIcon status={dep.status} />
+        <span className={cn("font-mono text-muted-foreground shrink-0", isDone && "line-through")}>
+          {dep.identifier ?? dep.id.slice(0, 8)}
+        </span>
+        <span className={cn("truncate", isDone && "line-through text-muted-foreground")}>
+          {dep.title}
+        </span>
+      </Link>
+      {onRemove && (
+        <button
+          onClick={onRemove}
+          disabled={removeDisabled}
+          className="ml-2 text-muted-foreground hover:text-destructive shrink-0 disabled:opacity-50 disabled:cursor-not-allowed"
+          aria-label="Remove dependency"
+        >
+          <X className="h-3.5 w-3.5" />
+        </button>
+      )}
+    </div>
+  );
+}
+
 function ActorIdentity({ evt, agentMap }: { evt: ActivityEvent; agentMap: Map<string, Agent> }) {
   const id = evt.actorId;
   if (evt.actorType === "agent") {
@@ -161,6 +212,7 @@ export function IssueDetail() {
     cost: false,
   });
   const [attachmentError, setAttachmentError] = useState<string | null>(null);
+  const [addDependencyOpen, setAddDependencyOpen] = useState(false);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const { pushToast } = useToast();
   const lastMarkedReadIssueIdRef = useRef<string | null>(null);
@@ -478,6 +530,29 @@ export function IssueDetail() {
     },
   });
 
+  const addBlocker = useMutation({
+    mutationFn: (blockerId: string) => issuesApi.addBlocker(issueId!, blockerId),
+    onSuccess: () => {
+      setAddDependencyOpen(false);
+      invalidateIssue();
+    },
+    onError: (err) => {
+      const message = err instanceof Error ? err.message : "Failed to add dependency";
+      pushToast({ title: "Add dependency failed", body: message, tone: "error" });
+    },
+  });
+
+  const removeBlocker = useMutation({
+    mutationFn: (blockerId: string) => issuesApi.removeBlocker(issueId!, blockerId),
+    onSuccess: () => {
+      invalidateIssue();
+    },
+    onError: (err) => {
+      const message = err instanceof Error ? err.message : "Failed to remove dependency";
+      pushToast({ title: "Remove dependency failed", body: message, tone: "error" });
+    },
+  });
+
   useEffect(() => {
     const titleLabel = issue?.title ?? issueId ?? "Issue";
     setBreadcrumbs([
@@ -770,6 +845,15 @@ export function IssueDetail() {
             <ListTree className="h-3.5 w-3.5" />
             Sub-issues
           </TabsTrigger>
+          <TabsTrigger value="dependencies" className="gap-1.5">
+            <Link2 className="h-3.5 w-3.5" />
+            Dependencies
+            {(issue.blockedBy ?? []).filter((b) => b.status !== "done" && b.status !== "cancelled").length > 0 && (
+              <span className="ml-0.5 rounded-full bg-destructive/20 text-destructive px-1 text-[10px] font-medium">
+                {(issue.blockedBy ?? []).filter((b) => b.status !== "done" && b.status !== "cancelled").length}
+              </span>
+            )}
+          </TabsTrigger>
           <TabsTrigger value="activity" className="gap-1.5">
             <ActivityIcon className="h-3.5 w-3.5" />
             Activity
@@ -835,6 +919,90 @@ export function IssueDetail() {
               ))}
             </div>
           )}
+        </TabsContent>
+
+        <TabsContent value="dependencies">
+          <div className="space-y-4">
+            {/* Depends On */}
+            <div>
+              <div className="flex items-center justify-between mb-2">
+                <span className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
+                  Depends On
+                </span>
+                <Popover open={addDependencyOpen} onOpenChange={setAddDependencyOpen}>
+                  <PopoverTrigger asChild>
+                    <Button variant="ghost" size="sm" className="h-6 text-xs gap-1">
+                      <Link2 className="h-3 w-3" />
+                      Add
+                    </Button>
+                  </PopoverTrigger>
+                  <PopoverContent className="w-72 p-0" align="end">
+                    <Command>
+                      <CommandInput placeholder="Search issues..." />
+                      <CommandList>
+                        <CommandEmpty>No issues found.</CommandEmpty>
+                        <CommandGroup>
+                          {(allIssues ?? [])
+                            .filter(
+                              (i) =>
+                                i.id !== issue.id &&
+                                !(issue.blockedBy ?? []).some((b) => b.id === i.id),
+                            )
+                            .map((i) => (
+                              <CommandItem
+                                key={i.id}
+                                value={`${i.identifier ?? i.id} ${i.title}`}
+                                onSelect={() => addBlocker.mutate(i.id)}
+                                disabled={addBlocker.isPending}
+                              >
+                                <StatusIcon status={i.status} />
+                                <span className="font-mono text-muted-foreground text-xs shrink-0 ml-1">
+                                  {i.identifier ?? i.id.slice(0, 8)}
+                                </span>
+                                <span className="truncate ml-1.5 text-xs">{i.title}</span>
+                              </CommandItem>
+                            ))}
+                        </CommandGroup>
+                      </CommandList>
+                    </Command>
+                  </PopoverContent>
+                </Popover>
+              </div>
+              {(issue.blockedBy ?? []).length === 0 ? (
+                <p className="text-xs text-muted-foreground">No dependencies.</p>
+              ) : (
+                <div className="border border-border rounded-lg divide-y divide-border">
+                  {(issue.blockedBy ?? []).map((dep) => (
+                    <DependencyRow
+                      key={dep.id}
+                      dep={dep}
+                      onRemove={() => removeBlocker.mutate(dep.id)}
+                      removeDisabled={removeBlocker.isPending}
+                      locationState={location.state}
+                    />
+                  ))}
+                </div>
+              )}
+            </div>
+
+            {/* Blocking */}
+            {(issue.blocks ?? []).length > 0 && (
+              <div>
+                <span className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
+                  Blocking
+                </span>
+                <div className="border border-border rounded-lg divide-y divide-border mt-2">
+                  {(issue.blocks ?? []).map((dep) => (
+                    <DependencyRow
+                      key={dep.id}
+                      dep={dep}
+                      locationState={location.state}
+                    />
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
         </TabsContent>
 
         <TabsContent value="activity">

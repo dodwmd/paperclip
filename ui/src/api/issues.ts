@@ -1,4 +1,4 @@
-import type { Approval, Issue, IssueAttachment, IssueComment, IssueLabel } from "@paperclipai/shared";
+import type { Approval, Issue, IssueAttachment, IssueComment, IssueLabel, IssueDependencyRef } from "@paperclipai/shared";
 import { api } from "./client";
 
 export const issuesApi = {
@@ -73,4 +73,10 @@ export const issuesApi = {
     api.post<Approval[]>(`/issues/${id}/approvals`, { approvalId }),
   unlinkApproval: (id: string, approvalId: string) =>
     api.delete<{ ok: true }>(`/issues/${id}/approvals/${approvalId}`),
+  getBlockers: (id: string) =>
+    api.get<{ blockedBy: IssueDependencyRef[]; blocks: IssueDependencyRef[] }>(`/issues/${id}/blockers`),
+  addBlocker: (id: string, blockerId: string) =>
+    api.post<{ blockedBy: IssueDependencyRef[]; blocks: IssueDependencyRef[] }>(`/issues/${id}/blockers`, { blockerId }),
+  removeBlocker: (id: string, blockerId: string) =>
+    api.delete<{ blockedBy: IssueDependencyRef[]; blocks: IssueDependencyRef[] }>(`/issues/${id}/blockers/${blockerId}`),
 };

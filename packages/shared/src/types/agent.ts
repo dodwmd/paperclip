@@ -28,6 +28,9 @@ export interface Agent {
   lastHeartbeatAt: Date | null;
   metadata: Record<string, unknown> | null;
   mcpServers: Record<string, unknown> | null;
+  personaGitUrl: string | null;
+  personaLastSyncedAt: Date | null;
+  personaLastSyncError: string | null;
   createdAt: Date;
   updatedAt: Date;
 }

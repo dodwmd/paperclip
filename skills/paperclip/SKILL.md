@@ -309,6 +309,9 @@ Treat retrieved values as sensitive — do not log them or include them in comme
 | List labels                           | `GET /api/companies/:companyId/labels`                                                     |
 | Create label                          | `POST /api/companies/:companyId/labels` `{ "name": "triaged", "color": "#10b981" }`        |
 | Delete label                          | `DELETE /api/labels/:labelId`                                                              |
+| List recent runs (all agents)         | `GET /api/companies/:companyId/heartbeat-runs?limit=N`                                     |
+| Read run log (NDJSON)                 | `GET /api/heartbeat-runs/:runId/log?limitBytes=N`                                          |
+| Read another agent's instructions     | `GET /api/agents/:agentId/instruction-files/:filename`                                     |
 
 ## Labels
 
@@ -459,6 +462,11 @@ pnpm paperclipai issue update <issue-id> --assignee-agent-id <other-agent-id> --
 5. Cleanup: mark temporary issues done/cancelled with a clear note.
 
 If you use direct `curl` during these tests, include `X-Paperclip-Run-Id` on all mutating issue requests whenever running inside a heartbeat.
+
+## Role: devops — Idle Heartbeat (no assigned task)
+
+If your `PAPERCLIP_AGENT_ROLE` is `devops` and `PAPERCLIP_TASK_ID` is **not** set, you are in monitoring mode.
+Do **not** run the standard heartbeat procedure above. Instead follow `skills/paperclip/devops-monitoring.md`.
 
 ## Full Reference
 

@@ -1026,6 +1026,76 @@ export function heartbeatService(db: Db) {
     return { reaped: reaped.length, runIds: reaped };
   }
 
+  // Default max wall-clock time: 4 hours. Overridable via HEARTBEAT_MAX_WALL_CLOCK_SEC.
+  const DEFAULT_MAX_WALL_CLOCK_SEC = 4 * 60 * 60;
+
+  async function reapStuckRuns(opts?: { maxWallClockMs?: number }) {
+    const maxWallClockMs =
+      opts?.maxWallClockMs ??
+      (Number(process.env.HEARTBEAT_MAX_WALL_CLOCK_SEC) || DEFAULT_MAX_WALL_CLOCK_SEC) * 1000;
+    const now = new Date();
+
+    const runningRuns = await db
+      .select()
+      .from(heartbeatRuns)
+      .where(eq(heartbeatRuns.status, "running"));
+
+    const killed: string[] = [];
+
+    for (const run of runningRuns) {
+      const running = runningProcesses.get(run.id);
+      if (!running) continue; // orphaned runs are handled by reapOrphanedRuns
+
+      const startedAt = run.startedAt ? new Date(run.startedAt).getTime() : 0;
+      if (!startedAt) continue;
+
+      const elapsed = now.getTime() - startedAt;
+      if (elapsed < maxWallClockMs) continue;
+
+      const elapsedMinutes = Math.round(elapsed / 60000);
+      logger.warn({ runId: run.id, agentId: run.agentId, elapsedMinutes }, "killing stuck run: exceeded max wall-clock time");
+
+      // Kill the process (SIGTERM + SIGKILL after grace)
+      running.child.kill("SIGTERM");
+      const graceMs = Math.max(1, running.graceSec) * 1000;
+      setTimeout(() => {
+        if (!running.child.killed) running.child.kill("SIGKILL");
+      }, graceMs);
+
+      // Mark as timed_out immediately so the completion handler respects it
+      const timedOut = await setRunStatus(run.id, "timed_out", {
+        finishedAt: now,
+        error: `Run exceeded max wall-clock time (${elapsedMinutes}m)`,
+        errorCode: "timeout",
+      });
+
+      await setWakeupStatus(run.wakeupRequestId, "failed", {
+        finishedAt: now,
+        error: "Run timed out",
+      });
+
+      if (timedOut) {
+        await appendRunEvent(timedOut, 1, {
+          eventType: "lifecycle",
+          stream: "system",
+          level: "warn",
+          message: `Run killed by control plane: exceeded max wall-clock time (${elapsedMinutes}m)`,
+        });
+        await releaseIssueExecutionAndPromote(timedOut);
+      }
+
+      await finalizeAgentStatus(run.agentId, "failed");
+      await startNextQueuedRunForAgent(run.agentId);
+      runningProcesses.delete(run.id);
+      killed.push(run.id);
+    }
+
+    if (killed.length > 0) {
+      logger.warn({ killedCount: killed.length, runIds: killed }, "reaped stuck heartbeat runs (wall-clock timeout)");
+    }
+    return { killed: killed.length, runIds: killed };
+  }
+
   async function updateRuntimeState(
     agent: typeof agents.$inferSelect,
     run: typeof heartbeatRuns.$inferSelect,
@@ -1555,6 +1625,8 @@ export function heartbeatService(db: Db) {
       const latestRun = await getRun(run.id);
       if (latestRun?.status === "cancelled") {
         outcome = "cancelled";
+      } else if (latestRun?.status === "timed_out") {
+        outcome = "timed_out";
       } else if (adapterResult.timedOut) {
         outcome = "timed_out";
       } else if ((adapterResult.exitCode ?? 0) === 0 && !adapterResult.errorMessage) {
@@ -2464,6 +2536,8 @@ export function heartbeatService(db: Db) {
     wakeup: enqueueWakeup,
 
     reapOrphanedRuns,
+
+    reapStuckRuns,
 
     tickTimers: async (now = new Date()) => {
       const allAgents = await db.select().from(agents);

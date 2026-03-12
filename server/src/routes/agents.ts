@@ -27,6 +27,7 @@ import {
   issueService,
   logActivity,
   secretService,
+  syncAgentPersona,
 } from "../services/index.js";
 import { conflict, forbidden, notFound, unprocessable } from "../errors.js";
 import { assertBoard, assertCompanyAccess, getActorInfo } from "./authz.js";
@@ -1611,6 +1612,37 @@ export function agentRoutes(db: Db) {
     });
 
     res.json({ ok: true, path: filePath });
+  });
+
+  // ---- Persona Git sync ----
+
+  router.post("/agents/:id/sync-persona", async (req, res) => {
+    const id = await normalizeAgentReference(req, req.params.id as string);
+    const existing = await svc.getById(id);
+    if (!existing) {
+      res.status(404).json({ error: "Agent not found" });
+      return;
+    }
+    assertCompanyAccess(req, existing.companyId);
+
+    if (!existing.personaGitUrl) {
+      res.status(422).json({ error: "Agent does not have a personaGitUrl configured" });
+      return;
+    }
+
+    const actor = getActorInfo(req);
+    const result = await syncAgentPersona(
+      db,
+      { id: existing.id, companyId: existing.companyId, personaGitUrl: existing.personaGitUrl },
+      actor,
+    );
+
+    if (!result.ok) {
+      res.status(422).json(result);
+      return;
+    }
+
+    res.json(result);
   });
 
   return router;

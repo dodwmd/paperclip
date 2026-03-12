@@ -8,6 +8,7 @@ import {
   goals,
   heartbeatRuns,
   issueAttachments,
+  issueDependencies,
   issueLabels,
   issueComments,
   issueReadStates,
@@ -254,6 +255,36 @@ async function labelMapForIssues(dbOrTx: any, issueIds: string[]): Promise<Map<s
     const existing = map.get(row.issueId);
     if (existing) existing.push(row.label);
     else map.set(row.issueId, [row.label]);
+  }
+  return map;
+}
+
+async function blockerSummaryForIssues(
+  dbOrTx: any,
+  issueIds: string[],
+): Promise<Map<string, Array<{ id: string; identifier: string | null; title: string; status: string }>>> {
+  const map = new Map<
+    string,
+    Array<{ id: string; identifier: string | null; title: string; status: string }>
+  >();
+  if (issueIds.length === 0) return map;
+  const rows = await dbOrTx
+    .select({
+      dependentId: issueDependencies.dependentId,
+      id: issues.id,
+      identifier: issues.identifier,
+      title: issues.title,
+      status: issues.status,
+    })
+    .from(issueDependencies)
+    .innerJoin(issues, eq(issueDependencies.blockerId, issues.id))
+    .where(inArray(issueDependencies.dependentId, issueIds));
+
+  for (const row of rows) {
+    const existing = map.get(row.dependentId);
+    const entry = { id: row.id, identifier: row.identifier, title: row.title, status: row.status };
+    if (existing) existing.push(entry);
+    else map.set(row.dependentId, [entry]);
   }
   return map;
 }
@@ -521,8 +552,18 @@ export function issueService(db: Db) {
       const withLabels = await withIssueLabels(db, rows);
       const runMap = await activeRunMapForIssues(db, withLabels);
       const withRuns = withActiveRuns(withLabels, runMap);
-      if (!contextUserId || withRuns.length === 0) {
-        return withRuns;
+
+      // Attach blockedBy summaries for all issues in one bulk query
+      const blockerMap = withRuns.length > 0
+        ? await blockerSummaryForIssues(db, withRuns.map((r) => r.id))
+        : new Map();
+      const withBlockers = withRuns.map((row) => ({
+        ...row,
+        blockedBy: blockerMap.get(row.id) ?? [],
+      }));
+
+      if (!contextUserId || withBlockers.length === 0) {
+        return withBlockers;
       }
 
       const issueIds = withRuns.map((row) => row.id);
@@ -565,7 +606,7 @@ export function issueService(db: Db) {
       const statsByIssueId = new Map(statsRows.map((row) => [row.issueId, row]));
       const readByIssueId = new Map(readRows.map((row) => [row.issueId, row.myLastReadAt]));
 
-      return withRuns.map((row) => ({
+      return withBlockers.map((row) => ({
         ...row,
         ...deriveIssueUserContext(row, contextUserId, {
           myLastCommentAt: statsByIssueId.get(row.id)?.myLastCommentAt ?? null,
@@ -1484,6 +1525,204 @@ export function issueService(db: Db) {
         )
         .then((rows) => rows[0]);
       return Number(result?.count ?? 0);
+    },
+
+    getDependencies: async (issueId: string) => {
+      const [blockedByRows, blocksRows] = await Promise.all([
+        db
+          .select({
+            id: issues.id,
+            identifier: issues.identifier,
+            title: issues.title,
+            status: issues.status,
+          })
+          .from(issueDependencies)
+          .innerJoin(issues, eq(issueDependencies.blockerId, issues.id))
+          .where(eq(issueDependencies.dependentId, issueId)),
+        db
+          .select({
+            id: issues.id,
+            identifier: issues.identifier,
+            title: issues.title,
+            status: issues.status,
+          })
+          .from(issueDependencies)
+          .innerJoin(issues, eq(issueDependencies.dependentId, issues.id))
+          .where(eq(issueDependencies.blockerId, issueId)),
+      ]);
+      return { blockedBy: blockedByRows, blocks: blocksRows };
+    },
+
+    addBlocker: async (
+      dependentId: string,
+      blockerId: string,
+      companyId: string,
+      actor: { agentId?: string | null; userId?: string | null },
+    ) => {
+      if (dependentId === blockerId) {
+        throw unprocessable("An issue cannot depend on itself");
+      }
+
+      // Verify blocker belongs to the same company
+      const blocker = await db
+        .select({ id: issues.id, companyId: issues.companyId, status: issues.status })
+        .from(issues)
+        .where(eq(issues.id, blockerId))
+        .then((rows) => rows[0] ?? null);
+      if (!blocker) throw unprocessable("Blocker issue not found");
+      if (blocker.companyId !== companyId) {
+        throw unprocessable("Blocker must belong to the same company");
+      }
+
+      // Circular dependency check (up to 10 hops)
+      const visited = new Set<string>([dependentId]);
+      let frontier = [blockerId];
+      for (let depth = 0; depth < 10 && frontier.length > 0; depth++) {
+        if (frontier.some((id) => visited.has(id))) {
+          throw unprocessable("Adding this dependency would create a circular chain");
+        }
+        const nextRows = await db
+          .select({ blockerId: issueDependencies.blockerId })
+          .from(issueDependencies)
+          .where(inArray(issueDependencies.dependentId, frontier));
+        frontier.forEach((id) => visited.add(id));
+        frontier = nextRows.map((r) => r.blockerId).filter((id) => !visited.has(id));
+      }
+
+      await db
+        .insert(issueDependencies)
+        .values({
+          dependentId,
+          blockerId,
+          companyId,
+          createdByAgentId: actor.agentId ?? null,
+          createdByUserId: actor.userId ?? null,
+        })
+        .onConflictDoNothing();
+
+      // Auto-block dependent if blocker is not yet resolved
+      const blockerResolved = blocker.status === "done" || blocker.status === "cancelled";
+      if (!blockerResolved) {
+        const dependent = await db
+          .select({ id: issues.id, status: issues.status })
+          .from(issues)
+          .where(eq(issues.id, dependentId))
+          .then((rows) => rows[0] ?? null);
+        if (dependent && dependent.status !== "blocked" && dependent.status !== "done" && dependent.status !== "cancelled") {
+          await db
+            .update(issues)
+            .set({ status: "blocked", updatedAt: new Date() })
+            .where(eq(issues.id, dependentId));
+        }
+      }
+    },
+
+    removeBlocker: async (dependentId: string, blockerId: string) => {
+      // Verify blocker belongs to the same company as dependent
+      const dependent = await db
+        .select({ id: issues.id, companyId: issues.companyId })
+        .from(issues)
+        .where(eq(issues.id, dependentId))
+        .then((rows) => rows[0] ?? null);
+      if (!dependent) throw notFound("Dependent issue not found");
+
+      const blocker = await db
+        .select({ id: issues.id, companyId: issues.companyId })
+        .from(issues)
+        .where(eq(issues.id, blockerId))
+        .then((rows) => rows[0] ?? null);
+      if (!blocker) throw notFound("Blocker issue not found");
+
+      if (blocker.companyId !== dependent.companyId) {
+        throw unprocessable("Blocker must belong to the same company");
+      }
+
+      const deleted = await db
+        .delete(issueDependencies)
+        .where(
+          and(
+            eq(issueDependencies.dependentId, dependentId),
+            eq(issueDependencies.blockerId, blockerId),
+          ),
+        )
+        .returning();
+
+      if (deleted.length === 0) {
+        return { deleted: false };
+      }
+
+      // Auto-unblock: if no remaining active blockers, transition blocked → todo
+      const dependentStatus = await db
+        .select({ id: issues.id, status: issues.status })
+        .from(issues)
+        .where(eq(issues.id, dependentId))
+        .then((rows) => rows[0] ?? null);
+
+      if (dependentStatus?.status === "blocked") {
+        const remainingActive = await db
+          .select({ blockerId: issueDependencies.blockerId })
+          .from(issueDependencies)
+          .innerJoin(issues, eq(issueDependencies.blockerId, issues.id))
+          .where(
+            and(
+              eq(issueDependencies.dependentId, dependentId),
+              sql`${issues.status} NOT IN ('done', 'cancelled')`,
+            ),
+          )
+          .then((rows) => rows.length);
+
+        if (remainingActive === 0) {
+          await db
+            .update(issues)
+            .set({ status: "todo", updatedAt: new Date() })
+            .where(eq(issues.id, dependentId));
+        }
+      }
+
+      return { deleted: true };
+    },
+
+    autoUnblockDependents: async (blockerId: string) => {
+      // Called when a blocker issue transitions to done/cancelled
+      const dependents = await db
+        .select({
+          dependentId: issueDependencies.dependentId,
+          status: issues.status,
+        })
+        .from(issueDependencies)
+        .innerJoin(issues, eq(issueDependencies.dependentId, issues.id))
+        .where(
+          and(
+            eq(issueDependencies.blockerId, blockerId),
+            eq(issues.status, "blocked"),
+          ),
+        );
+
+      if (dependents.length === 0) return [];
+
+      const unblocked: string[] = [];
+      for (const dep of dependents) {
+        const remainingActive = await db
+          .select({ blockerId: issueDependencies.blockerId })
+          .from(issueDependencies)
+          .innerJoin(issues, eq(issueDependencies.blockerId, issues.id))
+          .where(
+            and(
+              eq(issueDependencies.dependentId, dep.dependentId),
+              sql`${issues.status} NOT IN ('done', 'cancelled')`,
+            ),
+          )
+          .then((rows) => rows.length);
+
+        if (remainingActive === 0) {
+          await db
+            .update(issues)
+            .set({ status: "todo", updatedAt: new Date() })
+            .where(eq(issues.id, dep.dependentId));
+          unblocked.push(dep.dependentId);
+        }
+      }
+      return unblocked;
     },
 
     staleCount: async (companyId: string, minutes = 60) => {

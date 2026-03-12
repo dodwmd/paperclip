@@ -218,6 +218,20 @@
       "when": 1741651200000,
       "tag": "9002_kanban_pr_url",
       "breakpoints": true
+    },
+    {
+      "idx": 9003,
+      "version": "7",
+      "when": 1773256551827,
+      "tag": "9003_agent_persona_git",
+      "breakpoints": true
+    },
+    {
+      "idx": 9004,
+      "version": "7",
+      "when": 1741737600000,
+      "tag": "9004_issue_dependencies",
+      "breakpoints": true
     }
   ]
 }

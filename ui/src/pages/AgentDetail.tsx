@@ -1003,6 +1003,127 @@ function InstructionFileEditor({
   );
 }
 
+function PersonaRepoSection({
+  agent,
+  companyId,
+}: {
+  agent: Agent;
+  companyId?: string;
+}) {
+  const queryClient = useQueryClient();
+  const [urlDraft, setUrlDraft] = useState<string | null>(null);
+  const [syncResult, setSyncResult] = useState<{ ok: boolean; filesSynced?: string[]; error?: string } | null>(null);
+
+  const currentUrl = agent.personaGitUrl ?? "";
+  const displayUrl = urlDraft ?? currentUrl;
+  const isUrlDirty = urlDraft !== null && urlDraft !== currentUrl;
+
+  const saveUrl = useMutation({
+    mutationFn: (url: string | null) =>
+      agentsApi.update(agent.id, { personaGitUrl: url || null }, companyId),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.agents.detail(agent.id) });
+      queryClient.invalidateQueries({ queryKey: queryKeys.agents.detail(agent.urlKey) });
+      setUrlDraft(null);
+    },
+  });
+
+  const sync = useMutation({
+    mutationFn: () => agentsApi.syncPersona(agent.id, companyId),
+    onSuccess: (data) => {
+      setSyncResult(data);
+      queryClient.invalidateQueries({ queryKey: queryKeys.agents.detail(agent.id) });
+      queryClient.invalidateQueries({ queryKey: queryKeys.agents.detail(agent.urlKey) });
+      // Refresh instruction file editors
+      for (const filename of ["AGENTS.md", "HEARTBEAT.md", "SOUL.md", "TOOLS.md"] as const) {
+        queryClient.invalidateQueries({ queryKey: queryKeys.agents.instructionFile(agent.id, filename) });
+      }
+    },
+    onError: (err) => {
+      setSyncResult({ ok: false, error: err instanceof Error ? err.message : "Sync failed" });
+    },
+  });
+
+  return (
+    <div>
+      <h3 className="text-sm font-medium mb-3">Persona Repository</h3>
+      <div className="space-y-3">
+        <div className="space-y-1">
+          <p className="text-xs text-muted-foreground">
+            GitHub tree URL containing the agent's persona files (SOUL.md, AGENTS.md, HEARTBEAT.md, TOOLS.md).
+          </p>
+          <div className="flex items-center gap-2">
+            <Input
+              className="text-xs font-mono h-8 flex-1"
+              placeholder="https://github.com/owner/repo/tree/branch/agent-dir"
+              value={displayUrl}
+              onChange={(e) => setUrlDraft(e.target.value)}
+            />
+            {isUrlDirty && (
+              <>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="h-8 px-2 text-xs shrink-0"
+                  onClick={() => setUrlDraft(null)}
+                  disabled={saveUrl.isPending}
+                >
+                  Cancel
+                </Button>
+                <Button
+                  size="sm"
+                  className="h-8 px-2 text-xs shrink-0"
+                  onClick={() => saveUrl.mutate(displayUrl)}
+                  disabled={saveUrl.isPending}
+                >
+                  {saveUrl.isPending ? "Saving…" : "Save"}
+                </Button>
+              </>
+            )}
+            {!isUrlDirty && currentUrl && (
+              <Button
+                size="sm"
+                variant="outline"
+                className="h-8 px-2 text-xs shrink-0"
+                onClick={() => { setSyncResult(null); sync.mutate(); }}
+                disabled={sync.isPending}
+              >
+                {sync.isPending ? <><Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" />Syncing…</> : "Sync Now"}
+              </Button>
+            )}
+          </div>
+          {saveUrl.isError && (
+            <p className="text-xs text-destructive">
+              {saveUrl.error instanceof Error ? saveUrl.error.message : "Save failed"}
+            </p>
+          )}
+        </div>
+
+        {(agent.personaLastSyncedAt || agent.personaLastSyncError) && !syncResult && (
+          <p className="text-xs text-muted-foreground">
+            {agent.personaLastSyncError
+              ? <span className="text-destructive">Sync failed: {agent.personaLastSyncError}</span>
+              : agent.personaLastSyncedAt
+              ? <>Last synced: {relativeTime(new Date(agent.personaLastSyncedAt))}</>
+              : null}
+          </p>
+        )}
+
+        {syncResult && (
+          <p className="text-xs">
+            {syncResult.ok
+              ? <span className="text-green-600 dark:text-green-400">
+                  Synced {syncResult.filesSynced?.length ?? 0} file{syncResult.filesSynced?.length !== 1 ? "s" : ""}: {syncResult.filesSynced?.join(", ")}
+                </span>
+              : <span className="text-destructive">Sync failed: {syncResult.error}</span>
+            }
+          </p>
+        )}
+      </div>
+    </div>
+  );
+}
+
 function InstructionFilesSection({ agentId, companyId }: { agentId: string; companyId?: string }) {
   return (
     <div>
@@ -1528,6 +1649,8 @@ function AgentConfigurePage({
         <h3 className="text-sm font-medium mb-3">API Keys</h3>
         <KeysTab agentId={agentId} companyId={companyId} />
       </div>
+
+      <PersonaRepoSection agent={agent} companyId={companyId} />
 
       <InstructionFilesSection agentId={agent.id} companyId={companyId} />
 

@@ -578,6 +578,13 @@ export async function startServer(): Promise<StartedServer> {
         .catch((err) => {
           logger.error({ err }, "periodic reap of orphaned heartbeat runs failed");
         });
+
+      // Periodically kill runs that have exceeded the max wall-clock time
+      void heartbeat
+        .reapStuckRuns()
+        .catch((err) => {
+          logger.error({ err }, "periodic reap of stuck heartbeat runs failed");
+        });
     }, config.heartbeatSchedulerIntervalMs);
   }
   

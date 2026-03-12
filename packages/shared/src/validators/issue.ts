@@ -106,3 +106,9 @@ export const createIssueAttachmentMetadataSchema = z.object({
 });
 
 export type CreateIssueAttachmentMetadata = z.infer<typeof createIssueAttachmentMetadataSchema>;
+
+export const addIssueDependencySchema = z.object({
+  blockerId: z.string().uuid(),
+});
+
+export type AddIssueDependency = z.infer<typeof addIssueDependencySchema>;
