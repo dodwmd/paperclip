@@ -120,11 +120,10 @@ export const DEFAULT_TRANSITION_RULES: TransitionRule[] = [
   { from: "in_progress", to: "cancelled",   allowedRoles: ["pm"] },
 
   // ── In Review ───────────────────────────────────────────────────────────
-  // Reviewer (engineer peer or cto) approves → QA, or sends back. PM can cancel.
-  // cto may also mark directly done for stories that skip QA/deploy (e.g. docs, config).
-  { from: "in_review",   to: "qa",          allowedRoles: ["engineer", "cto"] },
-  { from: "in_review",   to: "in_progress", allowedRoles: ["engineer", "cto"] },
-  { from: "in_review",   to: "done",        allowedRoles: ["cto"] },
+  // Reviewer (engineer peer, cto, or qa) approves → QA, or sends back. PM can cancel.
+  { from: "in_review",   to: "qa",          allowedRoles: ["engineer", "cto", "qa"] },
+  { from: "in_review",   to: "in_progress", allowedRoles: ["engineer", "cto", "qa"] },
+  { from: "in_review",   to: "blocked",     allowedRoles: ["engineer", "cto", "qa"] },
   { from: "in_review",   to: "cancelled",   allowedRoles: ["pm"] },
 
   // ── QA ──────────────────────────────────────────────────────────────────
