@@ -101,6 +101,7 @@ export type {
   AgentRuntimeState,
   AgentTaskSession,
   AgentWakeupRequest,
+  InstanceSchedulerHeartbeatAgent,
   LiveEvent,
   DashboardSummary,
   ActivityEvent,

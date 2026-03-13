@@ -1061,8 +1061,6 @@ export function NewIssueDialog() {
                 </span>
               ) : createIssue.isError ? (
                 <span className="text-xs text-destructive">{createIssueErrorMessage}</span>
-              ) : canDiscardDraft ? (
-                <span className="text-xs text-muted-foreground">Draft autosaves locally</span>
               ) : null}
             </div>
             <Button

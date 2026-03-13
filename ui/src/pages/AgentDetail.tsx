@@ -73,6 +73,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { AgentIcon, AgentIconPicker } from "../components/AgentIconPicker";
 import { RunTranscriptView, type TranscriptMode } from "../components/transcript/RunTranscriptView";
 import { isUuidLike, type Agent, type HeartbeatRun, type HeartbeatRunEvent, type AgentRuntimeState, type LiveEvent } from "@paperclipai/shared";
+import { redactHomePathUserSegments, redactHomePathUserSegmentsInValue } from "@paperclipai/adapter-utils";
 import { agentRouteRef } from "../lib/utils";
 
 const runStatusIcons: Record<string, { icon: typeof CheckCircle2; color: string }> = {
@@ -106,11 +107,11 @@ function redactEnvValue(key: string, value: unknown): string {
   }
   if (shouldRedactSecretValue(key, value)) return REDACTED_ENV_VALUE;
   if (value === null || value === undefined) return "";
-  if (typeof value === "string") return value;
+  if (typeof value === "string") return redactHomePathUserSegments(value);
   try {
-    return JSON.stringify(value);
+    return JSON.stringify(redactHomePathUserSegmentsInValue(value));
   } catch {
-    return String(value);
+    return redactHomePathUserSegments(String(value));
   }
 }
 
@@ -2830,7 +2831,7 @@ function LogViewer({ run, adapterType }: { run: HeartbeatRun; adapterType: strin
 
   const adapterInvokePayload = useMemo(() => {
     const evt = events.find((e) => e.eventType === "adapter.invoke");
-    return asRecord(evt?.payload ?? null);
+    return redactHomePathUserSegmentsInValue(asRecord(evt?.payload ?? null));
   }, [events]);
 
   const adapter = useMemo(() => getUIAdapter(adapterType), [adapterType]);
@@ -2903,8 +2904,8 @@ function LogViewer({ run, adapterType }: { run: HeartbeatRun; adapterType: strin
               <div className="text-xs text-muted-foreground mb-1">Prompt</div>
               <pre className="bg-neutral-100 dark:bg-neutral-950 rounded-md p-2 text-xs overflow-x-auto whitespace-pre-wrap">
                 {typeof adapterInvokePayload.prompt === "string"
-                  ? adapterInvokePayload.prompt
-                  : JSON.stringify(adapterInvokePayload.prompt, null, 2)}
+                  ? redactHomePathUserSegments(adapterInvokePayload.prompt)
+                  : JSON.stringify(redactHomePathUserSegmentsInValue(adapterInvokePayload.prompt), null, 2)}
               </pre>
             </div>
           )}
@@ -2912,7 +2913,7 @@ function LogViewer({ run, adapterType }: { run: HeartbeatRun; adapterType: strin
             <div>
               <div className="text-xs text-muted-foreground mb-1">Context</div>
               <pre className="bg-neutral-100 dark:bg-neutral-950 rounded-md p-2 text-xs overflow-x-auto whitespace-pre-wrap">
-                {JSON.stringify(adapterInvokePayload.context, null, 2)}
+                {JSON.stringify(redactHomePathUserSegmentsInValue(adapterInvokePayload.context), null, 2)}
               </pre>
             </div>
           )}
@@ -3029,14 +3030,14 @@ function LogViewer({ run, adapterType }: { run: HeartbeatRun; adapterType: strin
           {run.error && (
             <div className="text-xs text-red-600 dark:text-red-200">
               <span className="text-red-700 dark:text-red-300">Error: </span>
-              {run.error}
+              {redactHomePathUserSegments(run.error)}
             </div>
           )}
           {run.stderrExcerpt && run.stderrExcerpt.trim() && (
             <div>
               <div className="text-xs text-red-700 dark:text-red-300 mb-1">stderr excerpt</div>
               <pre className="bg-red-50 dark:bg-neutral-950 rounded-md p-2 text-xs overflow-x-auto whitespace-pre-wrap text-red-800 dark:text-red-100">
-                {run.stderrExcerpt}
+                {redactHomePathUserSegments(run.stderrExcerpt)}
               </pre>
             </div>
           )}
@@ -3044,7 +3045,7 @@ function LogViewer({ run, adapterType }: { run: HeartbeatRun; adapterType: strin
             <div>
               <div className="text-xs text-red-700 dark:text-red-300 mb-1">adapter result JSON</div>
               <pre className="bg-red-50 dark:bg-neutral-950 rounded-md p-2 text-xs overflow-x-auto whitespace-pre-wrap text-red-800 dark:text-red-100">
-                {JSON.stringify(run.resultJson, null, 2)}
+                {JSON.stringify(redactHomePathUserSegmentsInValue(run.resultJson), null, 2)}
               </pre>
             </div>
           )}
@@ -3052,7 +3053,7 @@ function LogViewer({ run, adapterType }: { run: HeartbeatRun; adapterType: strin
             <div>
               <div className="text-xs text-red-700 dark:text-red-300 mb-1">stdout excerpt</div>
               <pre className="bg-red-50 dark:bg-neutral-950 rounded-md p-2 text-xs overflow-x-auto whitespace-pre-wrap text-red-800 dark:text-red-100">
-                {run.stdoutExcerpt}
+                {redactHomePathUserSegments(run.stdoutExcerpt)}
               </pre>
             </div>
           )}
@@ -3078,7 +3079,11 @@ function LogViewer({ run, adapterType }: { run: HeartbeatRun; adapterType: strin
                     {evt.stream ? `[${evt.stream}]` : ""}
                   </span>
                   <span className={cn("break-all", color)}>
-                    {evt.message ?? (evt.payload ? JSON.stringify(evt.payload) : "")}
+                    {evt.message
+                      ? redactHomePathUserSegments(evt.message)
+                      : evt.payload
+                        ? JSON.stringify(redactHomePathUserSegmentsInValue(evt.payload))
+                        : ""}
                   </span>
                 </div>
               );

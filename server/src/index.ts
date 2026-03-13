@@ -336,6 +336,7 @@ export async function startServer(): Promise<StartedServer> {
         password: "paperclip",
         port,
         persistent: true,
+        initdbFlags: ["--encoding=UTF8", "--locale=C"],
         onLog: appendEmbeddedPostgresLog,
         onError: appendEmbeddedPostgresLog,
       });

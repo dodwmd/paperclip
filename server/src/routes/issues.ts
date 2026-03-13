@@ -382,7 +382,11 @@ export function issueRoutes(db: Db, storage: StorageService) {
     const [ancestors, project, goal, mentionedProjectIds, deps] = await Promise.all([
       svc.getAncestors(issue.id),
       issue.projectId ? projectsSvc.getById(issue.projectId) : null,
-      issue.goalId ? goalsSvc.getById(issue.goalId) : null,
+      issue.goalId
+        ? goalsSvc.getById(issue.goalId)
+        : !issue.projectId
+          ? goalsSvc.getDefaultCompanyGoal(issue.companyId)
+          : null,
       svc.findMentionedProjectIds(issue.id),
       svc.getDependencies(issue.id),
     ]);
@@ -391,6 +395,7 @@ export function issueRoutes(db: Db, storage: StorageService) {
       : [];
     res.json({
       ...issue,
+      goalId: goal?.id ?? issue.goalId,
       ancestors,
       project: project ?? null,
       goal: goal ?? null,
