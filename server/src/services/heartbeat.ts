@@ -9,7 +9,6 @@ import {
   agentWakeupRequests,
   heartbeatRunEvents,
   heartbeatRuns,
-  costEvents,
   issues,
   projects,
   projectWorkspaces,
@@ -22,9 +21,11 @@ import { getServerAdapter, runningProcesses } from "../adapters/index.js";
 import type { AdapterExecutionResult, AdapterInvocationMeta, AdapterSessionCodec } from "../adapters/index.js";
 import { createLocalAgentJwt } from "../agent-auth-jwt.js";
 import { parseObject, asBoolean, asNumber, appendWithCap, MAX_EXCERPT_BYTES } from "../adapters/utils.js";
+import { costService } from "./costs.js";
 import { secretService } from "./secrets.js";
 import { resolveDefaultAgentWorkspaceDir, resolveDefaultAgentHomeDir } from "../home-paths.js";
 import { ensureAgentHomeDir, writeAgentMcpSettings } from "../agent-home.js";
+import { summarizeHeartbeatRunResultJson } from "./heartbeat-run-summary.js";
 import {
   buildWorkspaceReadyComment,
   ensureRuntimeServicesForRun,
@@ -39,6 +40,7 @@ import {
   parseProjectExecutionWorkspacePolicy,
   resolveExecutionWorkspaceMode,
 } from "./execution-workspace-policy.js";
+import { redactCurrentUserText, redactCurrentUserValue } from "../log-redaction.js";
 
 const MAX_LIVE_LOG_CHUNK_BYTES = 8 * 1024;
 const HEARTBEAT_MAX_CONCURRENT_RUNS_DEFAULT = 1;
@@ -46,38 +48,6 @@ const HEARTBEAT_MAX_CONCURRENT_RUNS_MAX = 10;
 const DEFERRED_WAKE_CONTEXT_KEY = "_paperclipWakeContext";
 const startLocksByAgent = new Map<string, Promise<void>>();
 const REPO_ONLY_CWD_SENTINEL = "/__paperclip_repo_only__";
-
-const summarizedHeartbeatRunResultJson = sql<Record<string, unknown> | null>`
-  CASE
-    WHEN ${heartbeatRuns.resultJson} IS NULL THEN NULL
-    ELSE NULLIF(
-      jsonb_strip_nulls(
-        jsonb_build_object(
-          'summary', CASE
-            WHEN ${heartbeatRuns.resultJson} ->> 'summary' IS NULL THEN NULL
-            ELSE left(${heartbeatRuns.resultJson} ->> 'summary', 500)
-          END,
-          'result', CASE
-            WHEN ${heartbeatRuns.resultJson} ->> 'result' IS NULL THEN NULL
-            ELSE left(${heartbeatRuns.resultJson} ->> 'result', 500)
-          END,
-          'message', CASE
-            WHEN ${heartbeatRuns.resultJson} ->> 'message' IS NULL THEN NULL
-            ELSE left(${heartbeatRuns.resultJson} ->> 'message', 500)
-          END,
-          'error', CASE
-            WHEN ${heartbeatRuns.resultJson} ->> 'error' IS NULL THEN NULL
-            ELSE left(${heartbeatRuns.resultJson} ->> 'error', 500)
-          END,
-          'total_cost_usd', ${heartbeatRuns.resultJson} -> 'total_cost_usd',
-          'cost_usd', ${heartbeatRuns.resultJson} -> 'cost_usd',
-          'costUsd', ${heartbeatRuns.resultJson} -> 'costUsd'
-        )
-      ),
-      '{}'::jsonb
-    )
-  END
-`;
 
 const heartbeatRunListColumns = {
   id: heartbeatRuns.id,
@@ -93,7 +63,7 @@ const heartbeatRunListColumns = {
   exitCode: heartbeatRuns.exitCode,
   signal: heartbeatRuns.signal,
   usageJson: heartbeatRuns.usageJson,
-  resultJson: summarizedHeartbeatRunResultJson.as("resultJson"),
+  resultJson: heartbeatRuns.resultJson,
   sessionIdBefore: heartbeatRuns.sessionIdBefore,
   sessionIdAfter: heartbeatRuns.sessionIdAfter,
   logStore: heartbeatRuns.logStore,
@@ -843,6 +813,9 @@ export function heartbeatService(db: Db) {
       payload?: Record<string, unknown>;
     },
   ) {
+    const sanitizedMessage = event.message ? redactCurrentUserText(event.message) : event.message;
+    const sanitizedPayload = event.payload ? redactCurrentUserValue(event.payload) : event.payload;
+
     await db.insert(heartbeatRunEvents).values({
       companyId: run.companyId,
       runId: run.id,
@@ -852,8 +825,8 @@ export function heartbeatService(db: Db) {
       stream: event.stream,
       level: event.level,
       color: event.color,
-      message: event.message,
-      payload: event.payload,
+      message: sanitizedMessage,
+      payload: sanitizedPayload,
     });
 
     publishLiveEvent({
@@ -867,8 +840,8 @@ export function heartbeatService(db: Db) {
         stream: event.stream ?? null,
         level: event.level ?? null,
         color: event.color ?? null,
-        message: event.message ?? null,
-        payload: event.payload ?? null,
+        message: sanitizedMessage ?? null,
+        payload: sanitizedPayload ?? null,
       },
     });
   }
@@ -1127,8 +1100,8 @@ export function heartbeatService(db: Db) {
       .where(eq(agentRuntimeState.agentId, agent.id));
 
     if (additionalCostCents > 0 || hasTokenUsage) {
-      await db.insert(costEvents).values({
-        companyId: agent.companyId,
+      const costs = costService(db);
+      await costs.createEvent(agent.companyId, {
         agentId: agent.id,
         provider: result.provider ?? "unknown",
         model: result.model ?? "unknown",
@@ -1137,16 +1110,6 @@ export function heartbeatService(db: Db) {
         costCents: additionalCostCents,
         occurredAt: new Date(),
       });
-    }
-
-    if (additionalCostCents > 0) {
-      await db
-        .update(agents)
-        .set({
-          spentMonthlyCents: sql`${agents.spentMonthlyCents} + ${additionalCostCents}`,
-          updatedAt: new Date(),
-        })
-        .where(eq(agents.id, agent.id));
     }
   }
 
@@ -1437,21 +1400,23 @@ export function heartbeatService(db: Db) {
         .where(eq(heartbeatRuns.id, runId));
 
       const onLog = async (stream: "stdout" | "stderr", chunk: string) => {
-        if (stream === "stdout") stdoutExcerpt = appendExcerpt(stdoutExcerpt, chunk);
-        if (stream === "stderr") stderrExcerpt = appendExcerpt(stderrExcerpt, chunk);
+        const sanitizedChunk = redactCurrentUserText(chunk);
+        if (stream === "stdout") stdoutExcerpt = appendExcerpt(stdoutExcerpt, sanitizedChunk);
+        if (stream === "stderr") stderrExcerpt = appendExcerpt(stderrExcerpt, sanitizedChunk);
+        const ts = new Date().toISOString();
 
         if (handle) {
           await runLogStore.append(handle, {
             stream,
-            chunk,
-            ts: new Date().toISOString(),
+            chunk: sanitizedChunk,
+            ts,
           });
         }
 
         const payloadChunk =
-          chunk.length > MAX_LIVE_LOG_CHUNK_BYTES
-            ? chunk.slice(chunk.length - MAX_LIVE_LOG_CHUNK_BYTES)
-            : chunk;
+          sanitizedChunk.length > MAX_LIVE_LOG_CHUNK_BYTES
+            ? sanitizedChunk.slice(sanitizedChunk.length - MAX_LIVE_LOG_CHUNK_BYTES)
+            : sanitizedChunk;
 
         publishLiveEvent({
           companyId: run.companyId,
@@ -1459,9 +1424,10 @@ export function heartbeatService(db: Db) {
           payload: {
             runId: run.id,
             agentId: run.agentId,
+            ts,
             stream,
             chunk: payloadChunk,
-            truncated: payloadChunk.length !== chunk.length,
+            truncated: payloadChunk.length !== sanitizedChunk.length,
           },
         });
       };
@@ -1663,7 +1629,9 @@ export function heartbeatService(db: Db) {
         error:
           outcome === "succeeded"
             ? null
-            : adapterResult.errorMessage ?? (outcome === "timed_out" ? "Timed out" : "Adapter failed"),
+            : redactCurrentUserText(
+                adapterResult.errorMessage ?? (outcome === "timed_out" ? "Timed out" : "Adapter failed"),
+              ),
         errorCode:
           outcome === "timed_out"
             ? "timeout"
@@ -1730,7 +1698,7 @@ export function heartbeatService(db: Db) {
       }
       await finalizeAgentStatus(agent.id, outcome);
     } catch (err) {
-      const message = err instanceof Error ? err.message : "Unknown adapter failure";
+      const message = redactCurrentUserText(err instanceof Error ? err.message : "Unknown adapter failure");
       logger.error({ err, runId }, "heartbeat execution failed");
 
       let logSummary: { bytes: number; sha256?: string; compressed: boolean } | null = null;
@@ -2416,10 +2384,11 @@ export function heartbeatService(db: Db) {
         )
         .orderBy(desc(heartbeatRuns.createdAt));
 
-      if (limit) {
-        return query.limit(limit);
-      }
-      return query;
+      const rows = limit ? await query.limit(limit) : await query;
+      return rows.map((row) => ({
+        ...row,
+        resultJson: summarizeHeartbeatRunResultJson(row.resultJson),
+      }));
     },
 
     getRun,
@@ -2515,6 +2484,7 @@ export function heartbeatService(db: Db) {
         store: run.logStore,
         logRef: run.logRef,
         ...result,
+        content: redactCurrentUserText(result.content),
       };
     },
 

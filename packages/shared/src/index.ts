@@ -101,6 +101,7 @@ export type {
   AgentRuntimeState,
   AgentTaskSession,
   AgentWakeupRequest,
+  InstanceSchedulerHeartbeatAgent,
   LiveEvent,
   DashboardSummary,
   ActivityEvent,
@@ -137,6 +138,11 @@ export {
   updateCompanySchema,
   type CreateCompany,
   type UpdateCompany,
+  columnDefinitionSchema,
+  transitionRuleSchema,
+  kanbanConfigSchema,
+  type KanbanConfigInput,
+  type KanbanConfigParsed,
   createAgentSchema,
   createAgentHireSchema,
   updateAgentSchema,
@@ -247,15 +253,23 @@ export {
 export { API_PREFIX, API, issueWorkflowPath } from "./api.js";
 export {
   DEFAULT_TRANSITION_RULES,
+  DEFAULT_COLUMNS,
   WIP_LIMITS,
   checkTransitionPolicy,
   checkWipPolicy,
+  resolveKanbanConfig,
   type TransitionRule,
+  type ColumnDefinition,
+  type KanbanConfig,
   type TransitionCheckResult,
   type TransitionDeniedReason,
   type TransitionActor,
   type ActorKind,
 } from "./kanban-policy.js";
+export {
+  KANBAN_TEMPLATES,
+  type KanbanTemplate,
+} from "./kanban-templates.js";
 export { normalizeAgentUrlKey, deriveAgentUrlKey, isUuidLike } from "./agent-url-key.js";
 export { deriveProjectUrlKey, normalizeProjectUrlKey } from "./project-url-key.js";
 export {

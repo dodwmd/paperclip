@@ -21,33 +21,10 @@ import { AlertTriangle, ChevronDown, ChevronUp } from "lucide-react";
 import { StatusIcon } from "./StatusIcon";
 import { PriorityIcon } from "./PriorityIcon";
 import { Identity } from "./Identity";
-import type { Issue } from "@paperclipai/shared";
-import { AGENT_ROLE_LABELS, DEFAULT_TRANSITION_RULES } from "@paperclipai/shared";
+import type { Issue, KanbanConfig } from "@paperclipai/shared";
+import { AGENT_ROLE_LABELS, resolveKanbanConfig } from "@paperclipai/shared";
 import { useToast } from "../context/ToastContext";
 
-/* ── Column config ── */
-
-type ColumnConfig = {
-  status: string;
-  wipLimit?: number;         // global item count limit
-  wipPerAssignee?: number;   // per-assignee limit
-};
-
-const BOARD_COLUMNS: ColumnConfig[] = [
-  { status: "backlog" },
-  { status: "todo" },
-  { status: "ready", wipLimit: 10 },
-  { status: "in_progress", wipPerAssignee: 2 },
-  { status: "in_review", wipLimit: 4 },
-  { status: "qa", wipLimit: 4 },
-  { status: "deploy" },
-  { status: "done" },
-  { status: "blocked" },
-  { status: "cancelled" },
-];
-
-/** Statuses that get truncated to COLUMN_TRUNCATE_LIMIT when not filtered */
-const TRUNCATED_STATUSES = new Set(["done", "cancelled"]);
 const COLUMN_TRUNCATE_LIMIT = 5;
 
 function statusLabel(status: string): string {
@@ -67,7 +44,19 @@ interface KanbanBoardProps {
   onUpdateIssue: (id: string, data: Record<string, unknown>) => void;
   /** When true (search/filters active), disables done/cancelled truncation */
   isFiltered?: boolean;
+  /** Company-specific kanban config; null/undefined uses system defaults */
+  kanbanConfig?: KanbanConfig | null;
 }
+
+/* ── ColumnConfig (internal, derived from ColumnDefinition) ── */
+
+type ColumnConfig = {
+  status: string;
+  label?: string;
+  wipLimit?: number;
+  wipPerAssignee?: number;
+  truncateByDefault?: boolean;
+};
 
 /* ── Droppable Column ── */
 
@@ -77,12 +66,14 @@ function KanbanColumn({
   agents,
   liveIssueIds,
   isFiltered,
+  isDimmedDuringDrag,
 }: {
   config: ColumnConfig;
   issues: Issue[];
   agents?: Agent[];
   liveIssueIds?: Set<string>;
   isFiltered?: boolean;
+  isDimmedDuringDrag?: boolean;
 }) {
   const { status, wipLimit, wipPerAssignee } = config;
   const { setNodeRef, isOver } = useDroppable({ id: status });
@@ -114,8 +105,8 @@ function KanbanColumn({
     ? `${issues.length} / ${wipLimit}`
     : `${issues.length}`;
 
-  // Truncation: only for done/cancelled when no search/filter is active
-  const canTruncate = TRUNCATED_STATUSES.has(status) && !isFiltered;
+  // Truncation: for columns marked truncateByDefault when no search/filter is active
+  const canTruncate = config.truncateByDefault === true && !isFiltered;
   const isTruncated = canTruncate && !showAll && issues.length > COLUMN_TRUNCATE_LIMIT;
   const displayedIssues = isTruncated ? issues.slice(0, COLUMN_TRUNCATE_LIMIT) : issues;
   const hiddenCount = isTruncated ? issues.length - COLUMN_TRUNCATE_LIMIT : 0;
@@ -125,11 +116,11 @@ function KanbanColumn({
     return (
       <div
         ref={setNodeRef}
-        className={`flex flex-col items-center min-w-[56px] w-[56px] shrink-0 rounded-md transition-colors ${
+        className={`flex flex-col items-center min-w-[56px] w-[56px] shrink-0 rounded-md transition-all duration-200 ${
           isOver
             ? "bg-accent/50 border-2 border-accent/60 min-h-[160px]"
             : "bg-muted/10 border border-dashed border-border/40 min-h-[120px]"
-        }`}
+        } ${isDimmedDuringDrag ? "opacity-30" : ""}`}
       >
         <div className="flex flex-col items-center gap-1.5 p-2 pt-3">
           <StatusIcon status={status} />
@@ -137,7 +128,7 @@ function KanbanColumn({
             className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground/40 my-1.5"
             style={{ writingMode: "vertical-rl", transform: "rotate(180deg)" }}
           >
-            {statusLabel(status)}
+            {config.label ?? statusLabel(status)}
           </span>
           <span className="text-[10px] text-muted-foreground/30 tabular-nums">0</span>
         </div>
@@ -146,11 +137,11 @@ function KanbanColumn({
   }
 
   return (
-    <div className="flex flex-col min-w-[240px] w-[240px] shrink-0">
+    <div className={`flex flex-col min-w-[240px] w-[240px] shrink-0 transition-opacity duration-200 ${isDimmedDuringDrag ? "opacity-30" : ""}`}>
       <div className="flex items-center gap-2 px-2 py-2 mb-1">
         <StatusIcon status={status} />
         <span className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-          {statusLabel(status)}
+          {config.label ?? statusLabel(status)}
         </span>
         <span
           className={`text-xs ml-auto tabular-nums font-medium ${
@@ -331,38 +322,77 @@ export function KanbanBoard({
   liveIssueIds,
   onUpdateIssue,
   isFiltered,
+  kanbanConfig,
 }: KanbanBoardProps) {
   const [activeId, setActiveId] = useState<string | null>(null);
+  const [draggingStatus, setDraggingStatus] = useState<string | null>(null);
   const { pushToast } = useToast();
 
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 5 } })
   );
 
+  // Resolve effective config (custom or system defaults)
+  const effectiveConfig = useMemo(() => resolveKanbanConfig(kanbanConfig ?? null), [kanbanConfig]);
+
+  // Map ColumnDefinition → internal ColumnConfig shape
+  const boardColumns: ColumnConfig[] = useMemo(
+    () =>
+      effectiveConfig.columns.map((col) => ({
+        status: col.status,
+        label: col.label,
+        wipLimit: col.wipGlobalLimit,
+        wipPerAssignee: col.wipPerAssigneeLimit,
+        truncateByDefault: col.truncateByDefault,
+      })),
+    [effectiveConfig],
+  );
+
   const columnIssues = useMemo(() => {
     const grouped: Record<string, Issue[]> = {};
-    for (const col of BOARD_COLUMNS) {
+    for (const col of boardColumns) {
       grouped[col.status] = [];
     }
     for (const issue of issues) {
-      if (grouped[issue.status]) {
+      if (grouped[issue.status] !== undefined) {
         grouped[issue.status].push(issue);
       }
     }
     return grouped;
-  }, [issues]);
+  }, [issues, boardColumns]);
 
   const activeIssue = useMemo(
     () => (activeId ? issues.find((i) => i.id === activeId) : null),
     [activeId, issues]
   );
 
+  // During drag: set of column statuses the dragged issue can legally move into.
+  // The dragged issue's current column is always included (no-op drop).
+  const validDragTargets = useMemo(() => {
+    if (!draggingStatus) return null;
+    return new Set(
+      effectiveConfig.rules
+        .filter((r) => r.from === draggingStatus)
+        .map((r) => r.to)
+        .concat([draggingStatus])
+    );
+  }, [draggingStatus, effectiveConfig.rules]);
+
   function handleDragStart(event: DragStartEvent) {
-    setActiveId(event.active.id as string);
+    const id = event.active.id as string;
+    setActiveId(id);
+    const draggedIssue = issues.find((i) => i.id === id);
+    if (draggedIssue) setDraggingStatus(draggedIssue.status);
+  }
+
+  function handleDragCancel() {
+    setActiveId(null);
+    setDraggingStatus(null);
   }
 
   function handleDragEnd(event: DragEndEvent) {
     setActiveId(null);
+    setDraggingStatus(null);
     const { active, over } = event;
     if (!over) return;
 
@@ -373,7 +403,7 @@ export function KanbanBoard({
     // Determine target status: "over" could be a column id (status string) or a card id
     let targetStatus: string | null = null;
 
-    if (BOARD_COLUMNS.some((c) => c.status === over.id)) {
+    if (boardColumns.some((c) => c.status === over.id)) {
       targetStatus = over.id as string;
     } else {
       // It's a card — find which column it's in
@@ -384,9 +414,9 @@ export function KanbanBoard({
     }
 
     // Client-side transition guard: check if this transition is defined in the
-    // shared policy rules. This is purely advisory UI feedback; server enforces.
+    // effective rules. This is purely advisory UI feedback; server enforces.
     if (targetStatus && targetStatus !== issue.status) {
-      const isDefined = DEFAULT_TRANSITION_RULES.some(
+      const isDefined = effectiveConfig.rules.some(
         (r) => r.from === issue.status && r.to === targetStatus
       );
       if (!isDefined) {
@@ -415,9 +445,10 @@ export function KanbanBoard({
       onDragStart={handleDragStart}
       onDragOver={handleDragOver}
       onDragEnd={handleDragEnd}
+      onDragCancel={handleDragCancel}
     >
       <div className="flex gap-3 overflow-x-auto pb-4 -mx-2 px-2 items-start">
-        {BOARD_COLUMNS.map((col) => (
+        {boardColumns.map((col) => (
           <KanbanColumn
             key={col.status}
             config={col}
@@ -425,6 +456,11 @@ export function KanbanBoard({
             agents={agents}
             liveIssueIds={liveIssueIds}
             isFiltered={isFiltered}
+            isDimmedDuringDrag={
+              draggingStatus !== null &&
+              validDragTargets !== null &&
+              !validDragTargets.has(col.status)
+            }
           />
         ))}
       </div>

@@ -1,10 +1,14 @@
 export { companyService } from "./companies.js";
 export {
   DEFAULT_TRANSITION_RULES,
+  DEFAULT_COLUMNS,
   WIP_LIMITS,
   checkTransitionPolicy,
   checkWipPolicy,
+  resolveKanbanConfig,
   type TransitionRule,
+  type ColumnDefinition,
+  type KanbanConfig,
   type TransitionCheckResult,
   type TransitionDeniedReason,
   type TransitionActor,
@@ -27,6 +31,7 @@ export { accessService } from "./access.js";
 export { companyPortabilityService } from "./company-portability.js";
 export { logActivity, type LogActivityInput } from "./activity-log.js";
 export { syncAgentPersona, parseGitHubTreeUrl, checkPersonaRemoteSha } from "./persona-sync.js";
+export { syncKanbanConfig, checkKanbanRemoteSha } from "./kanban-git-sync.js";
 export { notifyHireApproved, type NotifyHireApprovedInput } from "./hire-hook.js";
 export { publishLiveEvent, subscribeCompanyLiveEvents } from "./live-events.js";
 export { reconcilePersistedRuntimeServicesOnStartup } from "./workspace-runtime.js";

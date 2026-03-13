@@ -2,19 +2,22 @@ import { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useCompany } from "../context/CompanyContext";
 import { useBreadcrumbs } from "../context/BreadcrumbContext";
+import { useToast } from "../context/ToastContext";
 import { companiesApi } from "../api/companies";
 import { accessApi } from "../api/access";
 import { secretsApi } from "../api/secrets";
 import { queryKeys } from "../lib/queryKeys";
 import { Button } from "@/components/ui/button";
-import { Settings, Check, Eye, EyeOff, RotateCcw, Trash2, Plus, KeyRound } from "lucide-react";
+import { Settings, Check, Eye, EyeOff, RotateCcw, Trash2, Plus, KeyRound, Loader2, X } from "lucide-react";
+import { cn } from "../lib/utils";
 import { CompanyPatternIcon } from "../components/CompanyPatternIcon";
 import {
   Field,
   ToggleField,
   HintIcon
 } from "../components/agent-config-primitives";
-import type { CompanySecret } from "@paperclipai/shared";
+import { KanbanConfigEditor } from "../components/KanbanConfigEditor";
+import type { CompanySecret, KanbanConfig } from "@paperclipai/shared";
 
 type AgentSnippetInput = {
   onboardingTextUrl: string;
@@ -384,6 +387,16 @@ export function CompanySettings() {
       {/* Secrets */}
       <SecretsSection companyId={selectedCompanyId!} />
 
+      {/* Kanban Board */}
+      <KanbanBoardSection
+        companyId={selectedCompanyId!}
+        initialConfig={selectedCompany.kanbanConfig}
+        kanbanGitUrl={selectedCompany.kanbanGitUrl}
+        kanbanLastSyncedAt={selectedCompany.kanbanLastSyncedAt}
+        kanbanLastSyncError={selectedCompany.kanbanLastSyncError}
+        kanbanGitSha={selectedCompany.kanbanGitSha}
+      />
+
       {/* Danger Zone */}
       <div className="space-y-4">
         <div className="text-xs font-medium text-destructive uppercase tracking-wide">
@@ -713,6 +726,212 @@ function SecretsSection({ companyId }: { companyId: string }) {
               </div>
             ))}
           </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function KanbanBoardSection({
+  companyId,
+  initialConfig,
+  kanbanGitUrl,
+  kanbanLastSyncedAt,
+  kanbanLastSyncError,
+  kanbanGitSha,
+}: {
+  companyId: string;
+  initialConfig: KanbanConfig | null;
+  kanbanGitUrl: string | null;
+  kanbanLastSyncedAt: Date | null | string;
+  kanbanLastSyncError: string | null;
+  kanbanGitSha: string | null;
+}) {
+  const queryClient = useQueryClient();
+  const { pushToast } = useToast();
+
+  const [gitUrlDraft, setGitUrlDraft] = useState("");
+  const [isEditingGitUrl, setIsEditingGitUrl] = useState(false);
+  const [syncResult, setSyncResult] = useState<{ ok: boolean; sha?: string; columnsCount?: number; rulesCount?: number; error?: string } | null>(null);
+
+  const isGitManaged = !!kanbanGitUrl;
+
+  const { data: gitStatus } = useQuery({
+    queryKey: ["kanban-git-status", companyId],
+    queryFn: () => companiesApi.checkKanbanGitStatus(companyId),
+    enabled: isGitManaged,
+    staleTime: 60_000,
+  });
+
+  const saveGitUrl = useMutation({
+    mutationFn: (url: string | null) => companiesApi.update(companyId, { kanbanGitUrl: url }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.companies.all });
+      queryClient.invalidateQueries({ queryKey: ["kanban-git-status", companyId] });
+      setIsEditingGitUrl(false);
+      setGitUrlDraft("");
+      setSyncResult(null);
+    },
+    onError: (err) => {
+      pushToast({ title: "Failed to save git URL", body: err instanceof Error ? err.message : "Unknown error", tone: "error" });
+    },
+  });
+
+  const sync = useMutation({
+    mutationFn: () => companiesApi.syncKanbanConfig(companyId),
+    onSuccess: (data) => {
+      setSyncResult(data);
+      queryClient.invalidateQueries({ queryKey: queryKeys.companies.all });
+      queryClient.invalidateQueries({ queryKey: ["kanban-git-status", companyId] });
+    },
+    onError: (err) => {
+      setSyncResult({ ok: false, error: err instanceof Error ? err.message : "Sync failed" });
+    },
+  });
+
+  const kanbanMutation = useMutation({
+    mutationFn: (config: KanbanConfig | null) =>
+      companiesApi.updateKanbanConfig(companyId, config),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.companies.all });
+    },
+    onError: (err) => {
+      const body = (err as { body?: { error?: string; details?: unknown } }).body;
+      const detail = body?.details ? ` (${JSON.stringify(body.details)})` : "";
+      const message = (err instanceof Error ? err.message : "Unknown error") + detail;
+      pushToast({ title: "Failed to save kanban config", body: message, tone: "error" });
+    },
+  });
+
+  return (
+    <div className="space-y-4">
+      <div className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
+        Kanban Board
+      </div>
+      <div className="rounded-md border border-border px-4 py-4">
+        <p className="text-xs text-muted-foreground mb-4">
+          Configure columns, WIP limits, and transition rules for this company's board.
+          Start from a template or build your own.
+        </p>
+
+        {/* Git URL section */}
+        <div className="mb-4 space-y-2">
+          <p className="text-xs font-medium text-muted-foreground">Git Sync</p>
+          <p className="text-xs text-muted-foreground">
+            Optionally reference a raw JSON file URL to manage this company's kanban config from git.
+          </p>
+
+          {kanbanGitUrl && !isEditingGitUrl ? (
+            <div className="flex items-center gap-2">
+              <div className={cn(
+                "flex flex-1 items-center gap-1.5 rounded border px-2 py-1.5 text-xs font-mono bg-muted/40 min-w-0 overflow-hidden",
+                (() => {
+                  if (kanbanLastSyncError || gitStatus?.fetchError) return "border-destructive/50";
+                  if (gitStatus && !gitStatus.inSync) return "border-yellow-500/50";
+                  if (gitStatus?.inSync) return "border-green-500/50";
+                  return "";
+                })()
+              )}>
+                <span className={cn(
+                  "inline-block h-2 w-2 shrink-0 rounded-full",
+                  (() => {
+                    if (kanbanLastSyncError || gitStatus?.fetchError) return "bg-destructive";
+                    if (gitStatus && !gitStatus.inSync) return "bg-yellow-500";
+                    if (gitStatus?.inSync) return "bg-green-500";
+                    return "bg-muted-foreground";
+                  })()
+                )} />
+                <span className="truncate text-muted-foreground">{kanbanGitUrl}</span>
+                {(kanbanGitSha ?? gitStatus?.localSha) && (
+                  <span className="shrink-0 rounded bg-muted px-1 py-0.5 text-[10px]">
+                    {(kanbanGitSha ?? gitStatus?.localSha ?? "").slice(0, 8)}
+                  </span>
+                )}
+              </div>
+              <Button
+                size="sm" variant="ghost" className="h-7 w-7 p-0 shrink-0"
+                title="Remove git URL"
+                onClick={() => saveGitUrl.mutate(null)}
+                disabled={saveGitUrl.isPending}
+              >
+                <X className="h-3.5 w-3.5" />
+              </Button>
+              <Button
+                size="sm" variant="outline" className="h-7 px-2 text-xs shrink-0"
+                onClick={() => { setSyncResult(null); sync.mutate(); }}
+                disabled={sync.isPending}
+              >
+                {sync.isPending ? (
+                  <><Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" />Syncing…</>
+                ) : "Sync Now"}
+              </Button>
+            </div>
+          ) : (
+            <div className="flex items-center gap-2">
+              <input
+                className="flex-1 rounded border border-border bg-transparent px-2.5 py-1.5 text-xs font-mono outline-none focus:border-ring"
+                placeholder="https://raw.githubusercontent.com/org/repo/main/kanban.json"
+                value={isEditingGitUrl ? gitUrlDraft : ""}
+                onFocus={() => { setIsEditingGitUrl(true); }}
+                onChange={(e) => setGitUrlDraft(e.target.value)}
+              />
+              {isEditingGitUrl && (
+                <>
+                  <Button size="sm" variant="ghost" className="h-7 text-xs"
+                    onClick={() => { setIsEditingGitUrl(false); setGitUrlDraft(""); }}
+                    disabled={saveGitUrl.isPending}
+                  >Cancel</Button>
+                  <Button size="sm" className="h-7 text-xs"
+                    onClick={() => saveGitUrl.mutate(gitUrlDraft)}
+                    disabled={saveGitUrl.isPending || !gitUrlDraft.trim()}
+                  >
+                    {saveGitUrl.isPending ? "Saving…" : "Save"}
+                  </Button>
+                </>
+              )}
+            </div>
+          )}
+
+          {(kanbanLastSyncedAt || kanbanLastSyncError || syncResult) && (
+            <p className="text-xs text-muted-foreground">
+              {syncResult ? (
+                syncResult.ok ? (
+                  <span className="text-green-600 dark:text-green-400">
+                    Synced {syncResult.columnsCount} columns, {syncResult.rulesCount} rules
+                    {syncResult.sha ? ` (${syncResult.sha.slice(0, 8)})` : ""}
+                  </span>
+                ) : (
+                  <span className="text-destructive">Sync failed: {syncResult.error}</span>
+                )
+              ) : kanbanLastSyncError ? (
+                <span className="text-destructive">Last sync failed: {kanbanLastSyncError}</span>
+              ) : kanbanLastSyncedAt ? (
+                <>Last synced: {new Date(kanbanLastSyncedAt).toLocaleString()}
+                  {gitStatus && !gitStatus.inSync && !gitStatus.fetchError && (
+                    <span className="ml-1 text-yellow-600 dark:text-yellow-400">· update available</span>
+                  )}
+                </>
+              ) : null}
+            </p>
+          )}
+        </div>
+
+        <KanbanConfigEditor
+          companyId={companyId}
+          initialConfig={initialConfig}
+          onSave={(config) => kanbanMutation.mutate(config)}
+          isSaving={kanbanMutation.isPending}
+          readOnly={isGitManaged}
+        />
+        {kanbanMutation.isSuccess && (
+          <p className="mt-2 text-xs text-muted-foreground">Board config saved.</p>
+        )}
+        {kanbanMutation.isError && (
+          <p className="mt-2 text-xs text-destructive">
+            {kanbanMutation.error instanceof Error
+              ? kanbanMutation.error.message
+              : "Failed to save board config"}
+          </p>
         )}
       </div>
     </div>

@@ -7,10 +7,14 @@
  */
 export {
   DEFAULT_TRANSITION_RULES,
+  DEFAULT_COLUMNS,
   WIP_LIMITS,
   checkTransitionPolicy,
   checkWipPolicy,
+  resolveKanbanConfig,
   type TransitionRule,
+  type ColumnDefinition,
+  type KanbanConfig,
   type TransitionCheckResult,
   type TransitionDeniedReason,
   type TransitionActor,

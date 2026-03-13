@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { COMPANY_STATUSES } from "../constants.js";
+import { kanbanConfigSchema } from "./kanban-config.js";
 
 export const createCompanySchema = z.object({
   name: z.string().min(1),
@@ -16,6 +17,8 @@ export const updateCompanySchema = createCompanySchema
     spentMonthlyCents: z.number().int().nonnegative().optional(),
     requireBoardApprovalForNewAgents: z.boolean().optional(),
     brandColor: z.string().regex(/^#[0-9a-fA-F]{6}$/).nullable().optional(),
+    kanbanConfig: kanbanConfigSchema.nullable().optional(),
+    kanbanGitUrl: z.string().url().nullable().optional(),
   });
 
 export type UpdateCompany = z.infer<typeof updateCompanySchema>;

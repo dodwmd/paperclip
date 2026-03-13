@@ -1,6 +1,7 @@
 import { useMemo, useState } from "react";
 import { Link } from "@/lib/router";
 import type { Issue } from "@paperclipai/shared";
+import { resolveKanbanConfig } from "@paperclipai/shared";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { agentsApi } from "../api/agents";
 import { authApi } from "../api/auth";
@@ -101,7 +102,12 @@ function PropertyPicker({
 }
 
 export function IssueProperties({ issue, onUpdate, inline }: IssuePropertiesProps) {
-  const { selectedCompanyId } = useCompany();
+  const { selectedCompanyId, selectedCompany } = useCompany();
+  const effectiveKanbanConfig = useMemo(
+    () => resolveKanbanConfig(selectedCompany?.kanbanConfig ?? null),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [selectedCompany?.kanbanConfig],
+  );
   const queryClient = useQueryClient();
   const companyId = issue.companyId ?? selectedCompanyId;
 
@@ -475,6 +481,9 @@ export function IssueProperties({ issue, onUpdate, inline }: IssuePropertiesProp
             status={issue.status}
             onChange={(status) => onUpdate({ status })}
             showLabel
+            currentStatus={issue.status}
+            rules={effectiveKanbanConfig.rules}
+            columns={effectiveKanbanConfig.columns}
           />
         </PropertyRow>
 
@@ -637,6 +646,23 @@ export function IssueProperties({ issue, onUpdate, inline }: IssuePropertiesProp
       <Separator />
 
       <div className="space-y-1">
+        {(issue.createdByAgentId || issue.createdByUserId) && (
+          <PropertyRow label="Created by">
+            {issue.createdByAgentId ? (
+              <Link
+                to={`/agents/${issue.createdByAgentId}`}
+                className="hover:underline"
+              >
+                <Identity name={agentName(issue.createdByAgentId) ?? issue.createdByAgentId.slice(0, 8)} size="sm" />
+              </Link>
+            ) : (
+              <>
+                <User className="h-3.5 w-3.5 text-muted-foreground" />
+                <span className="text-sm">{creatorUserLabel ?? "User"}</span>
+              </>
+            )}
+          </PropertyRow>
+        )}
         {issue.startedAt && (
           <PropertyRow label="Started">
             <span className="text-sm">{formatDate(issue.startedAt)}</span>

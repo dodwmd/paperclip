@@ -1,4 +1,5 @@
-import { pgTable, uuid, text, integer, timestamp, boolean, uniqueIndex } from "drizzle-orm/pg-core";
+import { pgTable, uuid, text, integer, timestamp, boolean, uniqueIndex, jsonb } from "drizzle-orm/pg-core";
+import type { KanbanConfig } from "@paperclipai/shared";
 
 export const companies = pgTable(
   "companies",
@@ -15,6 +16,11 @@ export const companies = pgTable(
       .notNull()
       .default(true),
     brandColor: text("brand_color"),
+    kanbanConfig: jsonb("kanban_config").$type<KanbanConfig>(),
+    kanbanGitUrl: text("kanban_git_url"),
+    kanbanLastSyncedAt: timestamp("kanban_last_synced_at", { withTimezone: true }),
+    kanbanLastSyncError: text("kanban_last_sync_error"),
+    kanbanGitSha: text("kanban_git_sha"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },

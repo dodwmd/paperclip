@@ -5,6 +5,13 @@ export {
   type UpdateCompany,
 } from "./company.js";
 export {
+  columnDefinitionSchema,
+  transitionRuleSchema,
+  kanbanConfigSchema,
+  type KanbanConfigInput,
+  type KanbanConfigParsed,
+} from "./kanban-config.js";
+export {
   portabilityIncludeSchema,
   portabilitySecretRequirementSchema,
   portabilityCompanyManifestEntrySchema,

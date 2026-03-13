@@ -1,4 +1,5 @@
 import type { CompanyStatus } from "../constants.js";
+import type { KanbanConfig } from "../kanban-policy.js";
 
 export interface Company {
   id: string;
@@ -11,6 +12,11 @@ export interface Company {
   spentMonthlyCents: number;
   requireBoardApprovalForNewAgents: boolean;
   brandColor: string | null;
+  kanbanConfig: KanbanConfig | null;
+  kanbanGitUrl: string | null;
+  kanbanLastSyncedAt: Date | null;
+  kanbanLastSyncError: string | null;
+  kanbanGitSha: string | null;
   createdAt: Date;
   updatedAt: Date;
 }
