@@ -482,15 +482,18 @@ export function issueService(db: Db) {
       if (invalidCompany) {
         throw unprocessable("All blockers must belong to the same company");
       }
+    }
 
-      // Perform cycle detection for each new blocker
+    // Delete all existing dependencies for this issue BEFORE cycle detection
+    // to avoid false positives when checking against the clean graph
+    await dbOrTx.delete(issueDependencies).where(eq(issueDependencies.dependentId, issueId));
+
+    // Perform cycle detection for each new blocker on the clean graph
+    if (deduped.length > 0) {
       for (const blockerId of deduped) {
         await detectCycle(issueId, blockerId, dbOrTx);
       }
     }
-
-    // Delete all existing dependencies for this issue
-    await dbOrTx.delete(issueDependencies).where(eq(issueDependencies.dependentId, issueId));
 
     // Insert new dependencies
     if (deduped.length === 0) return;
@@ -841,6 +844,7 @@ export function issueService(db: Db) {
     update: async (
       id: string,
       data: Partial<typeof issues.$inferInsert> & { labelIds?: string[]; blockedByIds?: string[] },
+      actor?: { agentId?: string | null; userId?: string | null } | null,
     ) => {
       const existing = await db
         .select()
@@ -915,7 +919,7 @@ export function issueService(db: Db) {
           await syncIssueLabels(updated.id, existing.companyId, nextLabelIds, tx);
         }
         if (nextBlockedByIds !== undefined) {
-          await syncIssueDependencies(updated.id, existing.companyId, nextBlockedByIds, null, tx);
+          await syncIssueDependencies(updated.id, existing.companyId, nextBlockedByIds, actor ?? null, tx);
         }
         const [enriched] = await withIssueLabels(tx, [updated]);
         return enriched;
@@ -1684,25 +1688,8 @@ export function issueService(db: Db) {
         throw unprocessable("Blocker must belong to the same company");
       }
 
-      // BFS cycle detection: starting from blockerId, traverse UP the blocking chain
-      // (what blocks the blocker, and so on) up to MAX_DEPENDENCY_DEPTH levels.
-      // If we encounter dependentId within those hops, adding this edge would create a cycle — reject.
-      // Chains deeper than MAX_DEPENDENCY_DEPTH are accepted; very deep chains are rare in practice
-      // and the cost of a full traversal is not worth the edge-case safety.
-      // The value 10 was chosen as a practical upper bound well above typical real-world chain depths.
-      const visited = new Set<string>([dependentId]);
-      let frontier = [blockerId];
-      for (let depth = 0; depth < MAX_DEPENDENCY_DEPTH && frontier.length > 0; depth++) {
-        if (frontier.some((id) => visited.has(id))) {
-          throw unprocessable("Adding this dependency would create a circular chain");
-        }
-        const nextRows = await db
-          .select({ blockerId: issueDependencies.blockerId })
-          .from(issueDependencies)
-          .where(inArray(issueDependencies.dependentId, frontier));
-        frontier.forEach((id) => visited.add(id));
-        frontier = nextRows.map((r) => r.blockerId).filter((id) => !visited.has(id));
-      }
+      // Perform cycle detection using the shared helper
+      await detectCycle(dependentId, blockerId, db);
 
       await db
         .insert(issueDependencies)
