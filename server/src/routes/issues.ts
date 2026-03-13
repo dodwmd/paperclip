@@ -798,6 +798,19 @@ export function issueRoutes(db: Db, storage: StorageService) {
     }
     // ── End Kanban Workflow Enforcement ──────────────────────────────────
 
+    // Auto-assign a QA agent when issue moves into in_review (if no explicit assignee is being set)
+    let qaAutoAssignedId: string | null = null;
+    if (statusChanging && updateFields.status === "in_review" && req.body.assigneeAgentId === undefined) {
+      const companyAgents = await agentsSvc.list(existing.companyId);
+      const qaAgent = companyAgents.find(
+        (a) => a.role === "qa" && a.status !== "paused" && a.status !== "pending_approval",
+      );
+      if (qaAgent) {
+        updateFields.assigneeAgentId = qaAgent.id;
+        qaAutoAssignedId = qaAgent.id;
+      }
+    }
+
     let issue;
     try {
       issue = await svc.update(id, updateFields);
@@ -925,6 +938,18 @@ export function issueRoutes(db: Db, storage: StorageService) {
           requestedByActorType: actor.actorType,
           requestedByActorId: actor.actorId,
           contextSnapshot: { issueId: issue.id, source: "issue.status_change" },
+        });
+      }
+
+      if (qaAutoAssignedId && !wakeups.has(qaAutoAssignedId)) {
+        wakeups.set(qaAutoAssignedId, {
+          source: "assignment",
+          triggerDetail: "system",
+          reason: "issue_assigned",
+          payload: { issueId: issue.id, mutation: "update" },
+          requestedByActorType: actor.actorType,
+          requestedByActorId: actor.actorId,
+          contextSnapshot: { issueId: issue.id, source: "issue.qa_auto_assign" },
         });
       }
 
