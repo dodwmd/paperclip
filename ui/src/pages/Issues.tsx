@@ -4,6 +4,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { issuesApi } from "../api/issues";
 import { agentsApi } from "../api/agents";
 import { heartbeatsApi } from "../api/heartbeats";
+import { ApiError } from "../api/client";
 import { useCompany } from "../context/CompanyContext";
 import { useBreadcrumbs } from "../context/BreadcrumbContext";
 import { useToast } from "../context/ToastContext";
@@ -14,7 +15,7 @@ import { IssuesList } from "../components/IssuesList";
 import { CircleDot } from "lucide-react";
 
 export function Issues() {
-  const { selectedCompanyId } = useCompany();
+  const { selectedCompanyId, selectedCompany } = useCompany();
   const { setBreadcrumbs } = useBreadcrumbs();
   const location = useLocation();
   const [searchParams] = useSearchParams();
@@ -93,7 +94,12 @@ export function Issues() {
       queryClient.invalidateQueries({ queryKey: queryKeys.issues.list(selectedCompanyId!) });
     },
     onError: (err) => {
-      const message = err instanceof Error ? err.message : "Failed to update issue";
+      let message = err instanceof Error ? err.message : "Failed to update issue";
+      if (err instanceof ApiError) {
+        const body = err.body as { error?: string; detail?: string; code?: string } | null;
+        if (body?.detail) message = body.detail;
+        else if (body?.error && body.error !== message) message = body.error;
+      }
       pushToast({ title: "Update failed", body: message, tone: "error" });
       queryClient.invalidateQueries({ queryKey: queryKeys.issues.list(selectedCompanyId!) });
     },
@@ -116,6 +122,7 @@ export function Issues() {
       initialSearch={initialSearch}
       onSearchChange={handleSearchChange}
       onUpdateIssue={(id, data) => updateIssue.mutate({ id, data })}
+      kanbanConfig={selectedCompany?.kanbanConfig ?? null}
     />
   );
 }

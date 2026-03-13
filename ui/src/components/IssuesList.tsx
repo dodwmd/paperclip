@@ -20,11 +20,13 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Collapsible, CollapsibleTrigger, CollapsibleContent } from "@/components/ui/collapsible";
 import { CircleDot, Plus, Filter, ArrowUpDown, Layers, Check, X, ChevronRight, List, Columns3, User, Search } from "lucide-react";
 import { KanbanBoard } from "./KanbanBoard";
-import type { Issue } from "@paperclipai/shared";
+import type { Issue, KanbanConfig } from "@paperclipai/shared";
+import { resolveKanbanConfig } from "@paperclipai/shared";
 
 /* ── Helpers ── */
 
-const statusOrder = ["in_progress", "in_review", "qa", "deploy", "ready", "todo", "backlog", "blocked", "done", "cancelled"];
+// Default status order for list-view sorting (overridden by kanban config column order in component)
+const DEFAULT_STATUS_ORDER = ["in_progress", "in_review", "qa", "deploy", "ready", "todo", "backlog", "blocked", "done", "cancelled"];
 const priorityOrder = ["critical", "high", "medium", "low"];
 
 function statusLabel(status: string): string {
@@ -96,7 +98,7 @@ function applyFilters(issues: Issue[], state: IssueViewState): Issue[] {
   return result;
 }
 
-function sortIssues(issues: Issue[], state: IssueViewState): Issue[] {
+function sortIssues(issues: Issue[], state: IssueViewState, statusOrder: string[] = DEFAULT_STATUS_ORDER): Issue[] {
   const sorted = [...issues];
   const dir = state.sortDir === "asc" ? 1 : -1;
   sorted.sort((a, b) => {
@@ -147,6 +149,8 @@ interface IssuesListProps {
   initialSearch?: string;
   onSearchChange?: (search: string) => void;
   onUpdateIssue: (id: string, data: Record<string, unknown>) => void;
+  /** Company-specific kanban config; null/undefined uses system defaults */
+  kanbanConfig?: KanbanConfig | null;
 }
 
 export function IssuesList({
@@ -162,6 +166,7 @@ export function IssuesList({
   initialSearch,
   onSearchChange,
   onUpdateIssue,
+  kanbanConfig,
 }: IssuesListProps) {
   const { selectedCompanyId } = useCompany();
   const { openNewIssue } = useDialog();
@@ -211,7 +216,7 @@ export function IssuesList({
     });
   }, [scopedKey]);
 
-  const { data: searchedIssues = [] } = useQuery({
+  const { data: searchedIssues = [], isError: isSearchError } = useQuery({
     queryKey: queryKeys.issues.search(selectedCompanyId!, normalizedIssueSearch, projectId),
     queryFn: () => issuesApi.list(selectedCompanyId!, { q: normalizedIssueSearch, projectId }),
     enabled: !!selectedCompanyId && normalizedIssueSearch.length > 0,
@@ -222,11 +227,23 @@ export function IssuesList({
     return agents.find((a) => a.id === id)?.name ?? null;
   }, [agents]);
 
+  // Effective kanban config (custom or system defaults)
+  const effectiveConfig = useMemo(
+    () => resolveKanbanConfig(kanbanConfig ?? null),
+    [kanbanConfig],
+  );
+
+  // Status order derived from kanban config column order (for list-view sorting/grouping)
+  const statusOrder = useMemo(
+    () => effectiveConfig.columns.map((c) => c.status),
+    [effectiveConfig],
+  );
+
   const filtered = useMemo(() => {
     const sourceIssues = normalizedIssueSearch.length > 0 ? searchedIssues : issues;
     const filteredByControls = applyFilters(sourceIssues, viewState);
-    return sortIssues(filteredByControls, viewState);
-  }, [issues, searchedIssues, viewState, normalizedIssueSearch]);
+    return sortIssues(filteredByControls, viewState, statusOrder);
+  }, [issues, searchedIssues, viewState, normalizedIssueSearch, statusOrder]);
 
   const { data: labels } = useQuery({
     queryKey: queryKeys.issues.labels(selectedCompanyId!),
@@ -540,6 +557,7 @@ export function IssuesList({
 
       {isLoading && <PageSkeleton variant="issues-list" />}
       {error && <p className="text-sm text-destructive">{error.message}</p>}
+      {isSearchError && <p className="text-sm text-destructive">Search failed. Please try again.</p>}
 
       {!isLoading && filtered.length === 0 && viewState.viewMode === "list" && (
         <EmptyState
@@ -557,6 +575,7 @@ export function IssuesList({
           liveIssueIds={liveIssueIds}
           onUpdateIssue={onUpdateIssue}
           isFiltered={normalizedIssueSearch.length > 0 || activeFilterCount > 0}
+          kanbanConfig={kanbanConfig}
         />
       ) : (
         groupedContent.map((group) => (
@@ -606,6 +625,9 @@ export function IssuesList({
                       <StatusIcon
                         status={issue.status}
                         onChange={(s) => onUpdateIssue(issue.id, { status: s })}
+                        currentStatus={issue.status}
+                        rules={effectiveConfig.rules}
+                        columns={effectiveConfig.columns}
                       />
                     </span>
                   )}
@@ -624,6 +646,9 @@ export function IssuesList({
                         <StatusIcon
                           status={issue.status}
                           onChange={(s) => onUpdateIssue(issue.id, { status: s })}
+                          currentStatus={issue.status}
+                          rules={effectiveConfig.rules}
+                          columns={effectiveConfig.columns}
                         />
                       </span>
                       <span className="shrink-0 font-mono text-xs text-muted-foreground">

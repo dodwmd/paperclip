@@ -16,6 +16,7 @@ import { validate } from "../middleware/validate.js";
 import {
   accessService,
   agentService,
+  companyService,
   goalService,
   heartbeatService,
   issueApprovalService,
@@ -24,8 +25,8 @@ import {
   projectService,
   checkTransitionPolicy,
   checkWipPolicy,
-  WIP_LIMITS,
-  DEFAULT_TRANSITION_RULES,
+  resolveKanbanConfig,
+  type ColumnDefinition,
   type TransitionActor,
 } from "../services/index.js";
 import { logger } from "../middleware/logger.js";
@@ -43,6 +44,7 @@ export function issueRoutes(db: Db, storage: StorageService) {
   const projectsSvc = projectService(db);
   const goalsSvc = goalService(db);
   const issueApprovalsSvc = issueApprovalService(db);
+  const companiesSvc = companyService(db);
   const upload = multer({
     storage: multer.memoryStorage(),
     limits: { fileSize: MAX_ATTACHMENT_BYTES, files: 1 },
@@ -176,6 +178,30 @@ export function issueRoutes(db: Db, storage: StorageService) {
   }
 
   /**
+   * Returns the effective kanban config for a company (custom or defaults).
+   */
+  async function getCompanyKanbanConfig(companyId: string) {
+    const company = await companiesSvc.getById(companyId);
+    return resolveKanbanConfig(company?.kanbanConfig ?? null);
+  }
+
+  /**
+   * Builds a WIP limits map from column definitions, keyed by status.
+   */
+  function buildWipLimitsFromColumns(columns: ColumnDefinition[]) {
+    const result: Partial<Record<string, { globalLimit?: number; perAssigneeLimit?: number }>> = {};
+    for (const col of columns) {
+      if (col.wipGlobalLimit !== undefined || col.wipPerAssigneeLimit !== undefined) {
+        result[col.status] = {
+          globalLimit: col.wipGlobalLimit,
+          perAssigneeLimit: col.wipPerAssigneeLimit,
+        };
+      }
+    }
+    return result;
+  }
+
+  /**
    * Assert that WIP limits are not exceeded for the target status.
    * Logs a denial event and throws 409 if the limit is exceeded.
    *
@@ -190,41 +216,46 @@ export function issueRoutes(db: Db, storage: StorageService) {
     assigneeAgentId: string | null,
     issueId: string,
     actorRole: string | null,
+    wipLimits?: Partial<Record<string, { globalLimit?: number; perAssigneeLimit?: number }>>,
   ) {
     const [globalCount, assigneeCount] = await Promise.all([
       svc.countByStatus(companyId, toStatus),
       assigneeAgentId ? svc.countByStatusAndAssignee(companyId, toStatus, assigneeAgentId) : Promise.resolve(0),
     ]);
 
-    // Import IssueStatus-typed value from constants
     const wipResult = checkWipPolicy(
-      toStatus as Parameters<typeof checkWipPolicy>[0],
+      toStatus,
       globalCount,
       assigneeAgentId,
       assigneeCount,
+      wipLimits,
     );
 
     if (!wipResult.allowed) {
       const actor = getActorInfo(req);
       // Log BEFORE throwing (requirement from QA5)
-      await logActivity(db, {
-        companyId,
-        actorType: actor.actorType,
-        actorId: actor.actorId,
-        agentId: actor.agentId,
-        runId: actor.runId,
-        action: "issue.wip_exceeded",
-        entityType: "issue",
-        entityId: issueId,
-        details: {
-          status: toStatus,
-          globalCount,
-          assigneeCount,
-          assigneeAgentId,
-          actorRole,
-          detail: wipResult.detail,
-        },
-      });
+      try {
+        await logActivity(db, {
+          companyId,
+          actorType: actor.actorType,
+          actorId: actor.actorId,
+          agentId: actor.agentId,
+          runId: actor.runId,
+          action: "issue.wip_exceeded",
+          entityType: "issue",
+          entityId: issueId,
+          details: {
+            status: toStatus,
+            globalCount,
+            assigneeCount,
+            assigneeAgentId,
+            actorRole,
+            detail: wipResult.detail,
+          },
+        });
+      } catch (logErr) {
+        logger.warn({ err: logErr }, "logActivity failed for issue.wip_exceeded");
+      }
       throw new HttpError(409, wipResult.detail ?? "WIP limit exceeded", {
         code: wipResult.reason,
         status: toStatus,
@@ -423,17 +454,20 @@ export function issueRoutes(db: Db, storage: StorageService) {
     }
     assertCompanyAccess(req, issue.companyId);
 
-    const actorRole = await resolveActorRole(req);
+    const [actorRole, kanbanConfig] = await Promise.all([
+      resolveActorRole(req),
+      getCompanyKanbanConfig(issue.companyId),
+    ]);
     const policyActor: TransitionActor = {
       kind: req.actor.type === "board" ? "board" : "agent",
       role: actorRole,
     };
     const issueRecord = issue as Record<string, unknown>;
     const currentPrUrl = (issueRecord.prUrl as string | null) ?? null;
-    const currentStatus = issue.status as Parameters<typeof checkTransitionPolicy>[0];
+    const currentStatus = issue.status;
 
-    // Compute allowed transitions for this actor
-    const allowedTransitions = DEFAULT_TRANSITION_RULES
+    // Compute allowed transitions for this actor using company-specific rules
+    const allowedTransitions = kanbanConfig.rules
       .filter((rule) => rule.from === currentStatus)
       .map((rule) => {
         const result = checkTransitionPolicy(
@@ -441,6 +475,7 @@ export function issueRoutes(db: Db, storage: StorageService) {
           rule.to,
           policyActor,
           { prUrl: currentPrUrl },
+          kanbanConfig.rules,
         );
         return {
           to: rule.to,
@@ -723,7 +758,10 @@ export function issueRoutes(db: Db, storage: StorageService) {
     // are skipped. PATCH status transitions are safe to retry on network timeout.
     const statusChanging = updateFields.status !== undefined && updateFields.status !== existing.status;
     if (isEnforcementActive(req) && statusChanging) {
-      const actorRole = await resolveActorRole(req);
+      const [actorRole, kanbanConfig] = await Promise.all([
+        resolveActorRole(req),
+        getCompanyKanbanConfig(existing.companyId),
+      ]);
       const policyActor: TransitionActor = {
         kind: req.actor.type === "board" ? "board" : "agent",
         role: actorRole,
@@ -733,30 +771,34 @@ export function issueRoutes(db: Db, storage: StorageService) {
           ? (updateFields.prUrl as string | null)
           : (existing as Record<string, unknown>).prUrl as string | null ?? null;
 
-      const from = existing.status as Parameters<typeof checkTransitionPolicy>[0];
-      const to = updateFields.status as Parameters<typeof checkTransitionPolicy>[1];
+      const from = existing.status;
+      const to = updateFields.status as string;
 
-      const transitionResult = checkTransitionPolicy(from, to, policyActor, { prUrl: effectivePrUrl });
+      const transitionResult = checkTransitionPolicy(from, to, policyActor, { prUrl: effectivePrUrl }, kanbanConfig.rules);
       if (!transitionResult.allowed) {
         const actor = getActorInfo(req);
-        await logActivity(db, {
-          companyId: existing.companyId,
-          actorType: actor.actorType,
-          actorId: actor.actorId,
-          agentId: actor.agentId,
-          runId: actor.runId,
-          action: "issue.transition_denied",
-          entityType: "issue",
-          entityId: existing.id,
-          details: {
-            from,
-            to,
-            reason: transitionResult.reason,
-            detail: transitionResult.detail,
-            actorRole,
-            identifier: existing.identifier,
-          },
-        });
+        try {
+          await logActivity(db, {
+            companyId: existing.companyId,
+            actorType: actor.actorType,
+            actorId: actor.actorId,
+            agentId: actor.agentId,
+            runId: actor.runId,
+            action: "issue.transition_denied",
+            entityType: "issue",
+            entityId: existing.id,
+            details: {
+              from,
+              to,
+              reason: transitionResult.reason,
+              detail: transitionResult.detail,
+              actorRole,
+              identifier: existing.identifier,
+            },
+          });
+        } catch (logErr) {
+          logger.warn({ err: logErr }, "logActivity failed for issue.transition_denied");
+        }
         throw new HttpError(422, transitionResult.detail ?? "Transition not allowed", {
           code: transitionResult.reason,
           from,
@@ -769,7 +811,15 @@ export function issueRoutes(db: Db, storage: StorageService) {
         updateFields.assigneeAgentId !== undefined
           ? (updateFields.assigneeAgentId as string | null)
           : existing.assigneeAgentId;
-      await assertWipNotExceeded(req, existing.companyId, to, nextAssigneeId, existing.id, actorRole);
+      await assertWipNotExceeded(
+        req,
+        existing.companyId,
+        to,
+        nextAssigneeId,
+        existing.id,
+        actorRole,
+        buildWipLimitsFromColumns(kanbanConfig.columns),
+      );
 
       // Review-rejection wakeup: if status goes back to in_progress from review/qa/deploy
       // and assignee is unchanged, wake the assignee with reason "issue_review_rejected"
@@ -1056,7 +1106,7 @@ export function issueRoutes(db: Db, storage: StorageService) {
     if (isEnforcementActive(req) && req.actor.type === "agent") {
       const actorRole = await resolveActorRole(req);
       const checkoutCapableRoles = ["engineer", "cto"];
-      if (!checkoutCapableRoles.includes(actorRole ?? "")) {
+      if (!checkoutCapableRoles.includes(actorRole ?? "general")) {
         throw new HttpError(422, `Role '${actorRole ?? "general"}' cannot check out issues`, {
           code: "forbidden_role",
           role: actorRole,

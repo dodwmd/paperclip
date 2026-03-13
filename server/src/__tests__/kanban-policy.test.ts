@@ -203,11 +203,16 @@ describe("checkTransitionPolicy – denied: undefined transition", () => {
     expect(result.detail).toContain("not defined");
   });
 
-  it("ready → done directly is not defined", () => {
-    const result = checkTransitionPolicy("ready", "done", board, {});
-    expect(result.allowed).toBe(false);
-    expect(result.reason).toBe("forbidden_role");
-    expect(result.detail).toContain("not defined");
+  it("ready → done directly is not defined for agents (board can override)", () => {
+    // Agent actor is denied: no rule for ready → done
+    const resultAgent = checkTransitionPolicy("ready", "done", actor("engineer"), {});
+    expect(resultAgent.allowed).toBe(false);
+    expect(resultAgent.reason).toBe("forbidden_role");
+    expect(resultAgent.detail).toContain("not defined");
+
+    // Board actor can force any transition (bypass undefined rule)
+    const resultBoard = checkTransitionPolicy("ready", "done", board, {});
+    expect(resultBoard.allowed).toBe(true);
   });
 
   it("backlog → deploy directly is not defined", () => {

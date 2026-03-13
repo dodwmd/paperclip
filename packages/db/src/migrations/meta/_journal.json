@@ -239,6 +239,20 @@
       "when": 1741824000000,
       "tag": "9005_agent_persona_git_sha",
       "breakpoints": true
+    },
+    {
+      "idx": 9006,
+      "version": "7",
+      "when": 1741910400000,
+      "tag": "9006_company_kanban_config",
+      "breakpoints": true
+    },
+    {
+      "idx": 9007,
+      "version": "7",
+      "when": 1741996800000,
+      "tag": "9007_company_kanban_git",
+      "breakpoints": true
     }
   ]
 }

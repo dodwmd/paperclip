@@ -1,12 +1,13 @@
-import type { IssueStatus } from "./constants.js";
-
 // ---------------------------------------------------------------------------
 // Transition rules — pure data, imported by both server and UI
 // ---------------------------------------------------------------------------
+import { kanbanConfigSchema } from "./validators/kanban-config.js";
 
 export interface TransitionRule {
-  from: IssueStatus;
-  to: IssueStatus;
+  /** Status key the issue is moving from. Accepts any string to support custom columns. */
+  from: string;
+  /** Status key the issue is moving to. Accepts any string to support custom columns. */
+  to: string;
   /** Roles that can make this transition. "board" means board actor. */
   allowedRoles: string[];
   /** Fields that must be present on the issue for the transition to proceed. */
@@ -18,6 +19,58 @@ export interface TransitionRule {
    * DevOps deployment confirmation).
    */
   strict?: boolean;
+}
+
+// ---------------------------------------------------------------------------
+// Column definitions — describes each board column
+// ---------------------------------------------------------------------------
+
+export interface ColumnDefinition {
+  /** Internal snake_case status key, e.g. "intelligence_queue" */
+  status: string;
+  /** Display name shown on the board header */
+  label: string;
+  /** Global WIP limit — max total issues allowed in this column */
+  wipGlobalLimit?: number;
+  /** Per-assignee WIP limit — max issues per agent in this column */
+  wipPerAssigneeLimit?: number;
+  /** When true, column is collapsed to 5 items unless filtered (like done/cancelled) */
+  truncateByDefault?: boolean;
+}
+
+/** Full kanban configuration: ordered columns + transition rules */
+export interface KanbanConfig {
+  columns: ColumnDefinition[];
+  rules: TransitionRule[];
+}
+
+/** The default column set — mirrors the current hardcoded BOARD_COLUMNS in KanbanBoard.tsx */
+export const DEFAULT_COLUMNS: ColumnDefinition[] = [
+  { status: "backlog",     label: "Backlog" },
+  { status: "todo",        label: "Todo" },
+  { status: "ready",       label: "Ready",       wipGlobalLimit: 10 },
+  { status: "in_progress", label: "In Progress",  wipPerAssigneeLimit: 2 },
+  { status: "in_review",   label: "In Review",    wipGlobalLimit: 4 },
+  { status: "qa",          label: "QA",           wipGlobalLimit: 4 },
+  { status: "deploy",      label: "Deploy" },
+  { status: "done",        label: "Done",         truncateByDefault: true },
+  { status: "blocked",     label: "Blocked" },
+  { status: "cancelled",   label: "Cancelled",    truncateByDefault: true },
+];
+
+/**
+ * Returns the effective kanban config for a company.
+ * If the company has no custom config (null), returns the system defaults.
+ * If the config fails validation (e.g. corrupted DB JSON), logs a warning and falls back to defaults.
+ */
+export function resolveKanbanConfig(config: KanbanConfig | null | undefined): KanbanConfig {
+  if (!config) return { columns: DEFAULT_COLUMNS, rules: DEFAULT_TRANSITION_RULES };
+  const parsed = kanbanConfigSchema.safeParse(config);
+  if (!parsed.success) {
+    console.warn("[kanban-policy] resolveKanbanConfig: stored config failed validation, falling back to defaults.", parsed.error.flatten());
+    return { columns: DEFAULT_COLUMNS, rules: DEFAULT_TRANSITION_RULES };
+  }
+  return parsed.data;
 }
 
 /**
@@ -104,12 +157,12 @@ export const DEFAULT_TRANSITION_RULES: TransitionRule[] = [
 // WIP limits — pure data
 // ---------------------------------------------------------------------------
 
-export const WIP_LIMITS: Partial<Record<IssueStatus, { globalLimit?: number; perAssigneeLimit?: number }>> = {
-  ready:       { globalLimit: 10 },
-  in_progress: { perAssigneeLimit: 2 },
-  in_review:   { globalLimit: 4 },
-  qa:          { globalLimit: 4 },
-};
+export const WIP_LIMITS: Partial<Record<string, { globalLimit?: number; perAssigneeLimit?: number }>> =
+  Object.fromEntries(
+    DEFAULT_COLUMNS
+      .filter((c) => c.wipGlobalLimit !== undefined || c.wipPerAssigneeLimit !== undefined)
+      .map((c) => [c.status, { globalLimit: c.wipGlobalLimit, perAssigneeLimit: c.wipPerAssigneeLimit }]),
+  );
 
 // ---------------------------------------------------------------------------
 // Policy check types (shared between server and UI)
@@ -146,8 +199,8 @@ export interface TransitionActor {
 // ---------------------------------------------------------------------------
 
 export function checkTransitionPolicy(
-  from: IssueStatus,
-  to: IssueStatus,
+  from: string,
+  to: string,
   actor: TransitionActor,
   fields: { prUrl?: string | null },
   rules: TransitionRule[] = DEFAULT_TRANSITION_RULES,
@@ -155,6 +208,23 @@ export function checkTransitionPolicy(
   // Idempotency: status unchanged → always allowed (safe to retry).
   if (from === to) return { allowed: true };
 
+  // Board actors bypass all role and rule-existence checks — they can force
+  // any column transition as a manual override (hotfix, correction, CEO/CTO
+  // override, etc.). Only required-field checks still apply because the field
+  // is genuinely needed for the workflow to function (e.g. prUrl for in_review).
+  if (actor.kind === "board") {
+    const rule = rules.find((r) => r.from === from && r.to === to);
+    if (rule?.requiredFields?.includes("prUrl") && !fields.prUrl) {
+      return {
+        allowed: false,
+        reason: "missing_field",
+        detail: "A PR URL is required before moving to in_review",
+      };
+    }
+    return { allowed: true };
+  }
+
+  // Agent actor: rule must exist and role must be permitted.
   const rule = rules.find((r) => r.from === from && r.to === to);
   if (!rule) {
     return {
@@ -164,22 +234,19 @@ export function checkTransitionPolicy(
     };
   }
 
-  // Board actors bypass all role checks unconditionally.
-  if (actor.kind !== "board") {
-    const actorRole = actor.role ?? "general";
-    if (!rule.allowedRoles.includes(actorRole)) {
-      const detail = rule.strict
-        ? `Quality gate: only role '${rule.allowedRoles.join("/")}' may move '${from}' → '${to}'`
-        : `Role '${actorRole}' cannot move '${from}' → '${to}'`;
-      return {
-        allowed: false,
-        reason: "forbidden_role",
-        detail,
-      };
-    }
+  const actorRole = actor.role ?? "general";
+  if (!rule.allowedRoles.includes(actorRole)) {
+    const detail = rule.strict
+      ? `Quality gate: only role '${rule.allowedRoles.join("/")}' may move '${from}' → '${to}'`
+      : `Role '${actorRole}' cannot move '${from}' → '${to}'`;
+    return {
+      allowed: false,
+      reason: "forbidden_role",
+      detail,
+    };
   }
 
-  // Required field checks apply to all actors (including board).
+  // Required field checks apply to all actors.
   if (rule.requiredFields?.includes("prUrl") && !fields.prUrl) {
     return {
       allowed: false,
@@ -199,11 +266,11 @@ export function checkTransitionPolicy(
 // ---------------------------------------------------------------------------
 
 export function checkWipPolicy(
-  to: IssueStatus,
+  to: string,
   currentCountInColumn: number,
   assigneeAgentId: string | null,
   currentCountByAssignee: number,
-  wipLimits: typeof WIP_LIMITS = WIP_LIMITS,
+  wipLimits: Partial<Record<string, { globalLimit?: number; perAssigneeLimit?: number }>> = WIP_LIMITS,
 ): TransitionCheckResult {
   const config = wipLimits[to];
   if (!config) return { allowed: true };

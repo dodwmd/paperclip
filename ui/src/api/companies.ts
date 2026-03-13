@@ -1,5 +1,6 @@
 import type {
   Company,
+  KanbanConfig,
   CompanyPortabilityExportResult,
   CompanyPortabilityImportRequest,
   CompanyPortabilityImportResult,
@@ -21,7 +22,7 @@ export const companiesApi = {
     data: Partial<
       Pick<
         Company,
-        "name" | "description" | "status" | "budgetMonthlyCents" | "requireBoardApprovalForNewAgents" | "brandColor"
+        "name" | "description" | "status" | "budgetMonthlyCents" | "requireBoardApprovalForNewAgents" | "brandColor" | "kanbanGitUrl"
       >
     >,
   ) => api.patch<Company>(`/companies/${companyId}`, data),
@@ -33,4 +34,26 @@ export const companiesApi = {
     api.post<CompanyPortabilityPreviewResult>("/companies/import/preview", data),
   importBundle: (data: CompanyPortabilityImportRequest) =>
     api.post<CompanyPortabilityImportResult>("/companies/import", data),
+  getKanbanConfig: (companyId: string) =>
+    api.get<{ config: KanbanConfig | null }>(`/companies/${companyId}/kanban-config`),
+  updateKanbanConfig: (companyId: string, config: KanbanConfig | null) =>
+    api.put<Company>(`/companies/${companyId}/kanban-config`, { config }),
+
+  syncKanbanConfig: (companyId: string) =>
+    api.post<{
+      ok: boolean;
+      syncedAt?: string;
+      sha?: string;
+      columnsCount?: number;
+      rulesCount?: number;
+      error?: string;
+    }>(`/companies/${companyId}/sync-kanban-config`, {}),
+
+  checkKanbanGitStatus: (companyId: string) =>
+    api.get<{
+      remoteSha: string | null;
+      localSha: string | null;
+      inSync: boolean;
+      fetchError: boolean;
+    }>(`/companies/${companyId}/kanban-git-status`),
 };

@@ -14,6 +14,7 @@ import { errorHandler } from "../middleware/error-handler.js";
 const {
   mockIssueSvc,
   mockAgentSvc,
+  mockCompanySvc,
   mockLogActivity,
   mockWakeup,
 } = vi.hoisted(() => {
@@ -42,10 +43,12 @@ const {
     addBlocker: vi.fn(),
     removeBlocker: vi.fn(),
   };
-  const mockAgentSvc = { getById: vi.fn(), update: vi.fn() };
+  const mockAgentSvc = { getById: vi.fn(), update: vi.fn(), list: vi.fn().mockResolvedValue([]) };
+  // Return null kanbanConfig so tests use system defaults (backward-compat)
+  const mockCompanySvc = { getById: vi.fn().mockResolvedValue({ kanbanConfig: null }) };
   const mockLogActivity = vi.fn();
   const mockWakeup = vi.fn();
-  return { mockIssueSvc, mockAgentSvc, mockLogActivity, mockWakeup };
+  return { mockIssueSvc, mockAgentSvc, mockCompanySvc, mockLogActivity, mockWakeup };
 });
 
 vi.mock("../services/index.js", async (importOriginal) => {
@@ -54,6 +57,7 @@ vi.mock("../services/index.js", async (importOriginal) => {
     ...actual,
     issueService: () => mockIssueSvc,
     agentService: () => mockAgentSvc,
+    companyService: () => mockCompanySvc,
     projectService: () => ({
       getById: vi.fn(),
       listByIds: vi.fn().mockResolvedValue([]),
@@ -86,6 +90,7 @@ vi.mock("../services/index.js", async (importOriginal) => {
     WIP_LIMITS: actual.WIP_LIMITS,
     checkTransitionPolicy: actual.checkTransitionPolicy,
     checkWipPolicy: actual.checkWipPolicy,
+    resolveKanbanConfig: actual.resolveKanbanConfig,
   };
 });
 
@@ -213,6 +218,8 @@ beforeEach(() => {
   mockIssueSvc.listComments.mockResolvedValue([]);
   mockAgentSvc.getById.mockResolvedValue({ ...baseAgent });
   mockAgentSvc.update.mockResolvedValue({ ...baseAgent });
+  mockAgentSvc.list.mockResolvedValue([]);
+  mockCompanySvc.getById.mockResolvedValue({ kanbanConfig: null });
   mockLogActivity.mockResolvedValue(undefined);
   mockWakeup.mockResolvedValue(undefined);
   delete process.env.KANBAN_ENFORCEMENT_ENABLED;
@@ -485,13 +492,16 @@ describe("POST /issues/:id/comments — reopen enforcement", () => {
     expect(res.body.details?.code).toBe("forbidden_role");
   });
 
-  it("board cannot reopen done issue to todo (done tickets are not reopened)", async () => {
+  it("board can force-reopen done issue to todo (board override bypass)", async () => {
+    // Done tickets are not reopened by normal workflow rules, but board actors
+    // can bypass undefined transitions as a force override.
     mockIssueSvc.getById.mockResolvedValue({
       ...baseIssue,
       status: "done",
       checkoutRunId: null,
       executionRunId: null,
     });
+    mockIssueSvc.update.mockResolvedValue({ ...baseIssue, status: "todo" });
 
     const app = createApp({ type: "board", userId: "board-user", source: "session", isInstanceAdmin: true });
     const res = await request(app)
@@ -499,8 +509,7 @@ describe("POST /issues/:id/comments — reopen enforcement", () => {
       .set("Origin", "http://localhost:3100")
       .send({ body: "Reopening", reopen: true });
 
-    expect(res.status).toBe(422);
-    expect(res.body.details?.code).toBe("forbidden_role");
+    expect(res.status).toBe(201);
   });
 
   it("pm can reopen cancelled issue to todo", async () => {

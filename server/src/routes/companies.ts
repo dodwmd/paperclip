@@ -5,12 +5,14 @@ import {
   companyPortabilityImportSchema,
   companyPortabilityPreviewSchema,
   createCompanySchema,
+  kanbanConfigSchema,
   updateCompanySchema,
 } from "@paperclipai/shared";
 import { forbidden } from "../errors.js";
 import { validate } from "../middleware/validate.js";
-import { accessService, companyPortabilityService, companyService, logActivity } from "../services/index.js";
+import { accessService, companyPortabilityService, companyService, logActivity, syncKanbanConfig, checkKanbanRemoteSha } from "../services/index.js";
 import { assertBoard, assertCompanyAccess, getActorInfo } from "./authz.js";
+import { logger } from "../middleware/logger.js";
 
 export function companyRoutes(db: Db) {
   const router = Router();
@@ -146,6 +148,111 @@ export function companyRoutes(db: Db) {
     res.json(company);
   });
 
+  // ── Kanban config ──────────────────────────────────────────────────────────
+
+  router.get("/:companyId/kanban-config", async (req, res) => {
+    assertBoard(req);
+    const companyId = req.params.companyId as string;
+    assertCompanyAccess(req, companyId);
+    const company = await svc.getById(companyId);
+    if (!company) {
+      res.status(404).json({ error: "Company not found" });
+      return;
+    }
+    res.json({ config: company.kanbanConfig ?? null });
+  });
+
+  // NOTE: This endpoint intentionally uses manual safeParse instead of the validate() middleware.
+  // The body may be null (to reset kanban config to defaults), which validate() does not support
+  // since it calls schema.parse(req.body) unconditionally on a non-nullable schema.
+  router.put("/:companyId/kanban-config", async (req, res) => {
+    assertBoard(req);
+    const companyId = req.params.companyId as string;
+    assertCompanyAccess(req, companyId);
+
+    const existing = await svc.getById(companyId);
+    if (!existing) {
+      res.status(404).json({ error: "Company not found" });
+      return;
+    }
+    if (existing.kanbanGitUrl) {
+      res.status(409).json({ error: "Kanban config is managed by a git URL. Clear the kanbanGitUrl before editing manually." });
+      return;
+    }
+
+    try {
+      // null body = reset to defaults
+      const rawConfig = req.body?.config ?? req.body ?? null;
+      let kanbanConfig = null;
+      if (rawConfig !== null) {
+        const parsed = kanbanConfigSchema.safeParse(rawConfig);
+        if (!parsed.success) {
+          res.status(422).json({ error: "Invalid kanban config", details: parsed.error.flatten() });
+          return;
+        }
+        kanbanConfig = parsed.data;
+      }
+
+      const company = await svc.update(companyId, { kanbanConfig });
+      if (!company) {
+        res.status(404).json({ error: "Company not found" });
+        return;
+      }
+      await logActivity(db, {
+        companyId,
+        actorType: "user",
+        actorId: req.actor.userId ?? "board",
+        action: "company.kanban_config_updated",
+        entityType: "company",
+        entityId: companyId,
+        details: { hasCustomConfig: kanbanConfig !== null },
+      });
+      res.json(company);
+    } catch (err) {
+      logger.error({ err }, "PUT /kanban-config failed");
+      res.status(500).json({ error: "Internal server error" });
+    }
+  });
+
+  router.get("/:companyId/kanban-git-status", async (req, res) => {
+    assertBoard(req);
+    const companyId = req.params.companyId as string;
+    assertCompanyAccess(req, companyId);
+    const company = await svc.getById(companyId);
+    if (!company) {
+      res.status(404).json({ error: "Company not found" });
+      return;
+    }
+    if (!company.kanbanGitUrl) {
+      res.status(422).json({ error: "Company does not have a kanbanGitUrl configured" });
+      return;
+    }
+    const result = await checkKanbanRemoteSha(company.kanbanGitUrl, company.kanbanGitSha ?? null);
+    res.json(result);
+  });
+
+  router.post("/:companyId/sync-kanban-config", async (req, res) => {
+    assertBoard(req);
+    const companyId = req.params.companyId as string;
+    assertCompanyAccess(req, companyId);
+    const company = await svc.getById(companyId);
+    if (!company) {
+      res.status(404).json({ error: "Company not found" });
+      return;
+    }
+    if (!company.kanbanGitUrl) {
+      res.status(422).json({ error: "Company does not have a kanbanGitUrl configured" });
+      return;
+    }
+    const actor = getActorInfo(req);
+    const result = await syncKanbanConfig(db, { id: company.id, companyId: company.id, kanbanGitUrl: company.kanbanGitUrl, kanbanGitSha: company.kanbanGitSha ?? null }, actor);
+    if (!result.ok) {
+      res.status(422).json(result);
+      return;
+    }
+    res.json(result);
+  });
+
   router.post("/:companyId/archive", async (req, res) => {
     assertBoard(req);
     const companyId = req.params.companyId as string;
@@ -175,6 +282,14 @@ export function companyRoutes(db: Db) {
       res.status(404).json({ error: "Company not found" });
       return;
     }
+    await logActivity(db, {
+      companyId,
+      actorType: "user",
+      actorId: req.actor.userId ?? "board",
+      action: "company.deleted",
+      entityType: "company",
+      entityId: company.id,
+    });
     res.json({ ok: true });
   });
 
