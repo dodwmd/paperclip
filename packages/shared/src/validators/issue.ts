@@ -75,6 +75,7 @@ export const updateIssueSchema = createIssueSchema.partial().extend({
   comment: z.string().min(1).optional(),
   hiddenAt: z.string().datetime().nullable().optional(),
   prUrl: prUrlSchema,
+  blockedByIds: z.array(z.string().uuid()).optional(),
 });
 
 export type UpdateIssue = z.infer<typeof updateIssueSchema>;

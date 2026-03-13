@@ -435,6 +435,77 @@ export function issueService(db: Db) {
     );
   }
 
+  async function detectCycle(dependentId: string, blockerId: string, dbOrTx: any) {
+    // BFS cycle detection: traverse UP the blocking chain from blockerId
+    // If we encounter dependentId, adding this edge would create a cycle
+    const visited = new Set<string>([dependentId]);
+    let frontier = [blockerId];
+    for (let depth = 0; depth < MAX_DEPENDENCY_DEPTH && frontier.length > 0; depth++) {
+      if (frontier.some((id) => visited.has(id))) {
+        throw unprocessable("Adding this dependency would create a circular chain");
+      }
+      const nextRows = await dbOrTx
+        .select({ blockerId: issueDependencies.blockerId })
+        .from(issueDependencies)
+        .where(inArray(issueDependencies.dependentId, frontier));
+      frontier.forEach((id) => visited.add(id));
+      frontier = nextRows.map((r) => r.blockerId).filter((id) => !visited.has(id));
+    }
+  }
+
+  async function syncIssueDependencies(
+    issueId: string,
+    companyId: string,
+    blockerIds: string[],
+    actor: { agentId?: string | null; userId?: string | null } | null = null,
+    dbOrTx: any = db,
+  ) {
+    const deduped = [...new Set(blockerIds)];
+
+    if (deduped.length > 0) {
+      // Check for self-dependency
+      if (deduped.includes(issueId)) {
+        throw unprocessable("An issue cannot depend on itself");
+      }
+
+      // Verify all blocker issues exist and belong to the same company
+      const blockerIssues = await dbOrTx
+        .select({ id: issues.id, companyId: issues.companyId })
+        .from(issues)
+        .where(inArray(issues.id, deduped));
+
+      if (blockerIssues.length !== deduped.length) {
+        throw unprocessable("One or more blocker issues not found");
+      }
+
+      const invalidCompany = blockerIssues.find((b) => b.companyId !== companyId);
+      if (invalidCompany) {
+        throw unprocessable("All blockers must belong to the same company");
+      }
+
+      // Perform cycle detection for each new blocker
+      for (const blockerId of deduped) {
+        await detectCycle(issueId, blockerId, dbOrTx);
+      }
+    }
+
+    // Delete all existing dependencies for this issue
+    await dbOrTx.delete(issueDependencies).where(eq(issueDependencies.dependentId, issueId));
+
+    // Insert new dependencies
+    if (deduped.length === 0) return;
+
+    await dbOrTx.insert(issueDependencies).values(
+      deduped.map((blockerId) => ({
+        dependentId: issueId,
+        blockerId,
+        companyId,
+        createdByAgentId: actor?.agentId ?? null,
+        createdByUserId: actor?.userId ?? null,
+      })),
+    );
+  }
+
   async function isTerminalOrMissingHeartbeatRun(runId: string) {
     const run = await db
       .select({ status: heartbeatRuns.status })
@@ -767,7 +838,10 @@ export function issueService(db: Db) {
       });
     },
 
-    update: async (id: string, data: Partial<typeof issues.$inferInsert> & { labelIds?: string[] }) => {
+    update: async (
+      id: string,
+      data: Partial<typeof issues.$inferInsert> & { labelIds?: string[]; blockedByIds?: string[] },
+    ) => {
       const existing = await db
         .select()
         .from(issues)
@@ -775,7 +849,7 @@ export function issueService(db: Db) {
         .then((rows) => rows[0] ?? null);
       if (!existing) return null;
 
-      const { labelIds: nextLabelIds, ...issueData } = data;
+      const { labelIds: nextLabelIds, blockedByIds: nextBlockedByIds, ...issueData } = data;
 
       if (issueData.status) {
         assertTransition(existing.status, issueData.status);
@@ -839,6 +913,9 @@ export function issueService(db: Db) {
         if (!updated) return null;
         if (nextLabelIds !== undefined) {
           await syncIssueLabels(updated.id, existing.companyId, nextLabelIds, tx);
+        }
+        if (nextBlockedByIds !== undefined) {
+          await syncIssueDependencies(updated.id, existing.companyId, nextBlockedByIds, null, tx);
         }
         const [enriched] = await withIssueLabels(tx, [updated]);
         return enriched;
