@@ -869,7 +869,10 @@ export function issueRoutes(db: Db, storage: StorageService) {
     let issue;
     try {
       const actor = getActorInfo(req);
-      const actorInfo = { agentId: actor.agentId ?? null, userId: actor.userId ?? null };
+      const actorInfo = {
+        agentId: actor.actorType === "agent" ? actor.agentId : null,
+        userId: actor.actorType === "user" ? actor.actorId : null,
+      };
       issue = await svc.update(id, updateFields, actorInfo);
     } catch (err) {
       if (err instanceof HttpError && err.status === 422) {

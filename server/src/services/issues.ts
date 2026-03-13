@@ -449,7 +449,7 @@ export function issueService(db: Db) {
         .from(issueDependencies)
         .where(inArray(issueDependencies.dependentId, frontier));
       frontier.forEach((id) => visited.add(id));
-      frontier = nextRows.map((r) => r.blockerId).filter((id) => !visited.has(id));
+      frontier = nextRows.map((r: { blockerId: string }) => r.blockerId).filter((id: string) => !visited.has(id));
     }
   }
 
@@ -478,7 +478,7 @@ export function issueService(db: Db) {
         throw unprocessable("One or more blocker issues not found");
       }
 
-      const invalidCompany = blockerIssues.find((b) => b.companyId !== companyId);
+      const invalidCompany = blockerIssues.find((b: { id: string; companyId: string }) => b.companyId !== companyId);
       if (invalidCompany) {
         throw unprocessable("All blockers must belong to the same company");
       }
