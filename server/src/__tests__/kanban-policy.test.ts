@@ -328,6 +328,23 @@ describe("checkTransitionPolicy – engineer review paths", () => {
   });
 });
 
+describe("checkTransitionPolicy – QA review paths (regression: PAP-57)", () => {
+  it("qa: in_review → qa (approve code review)", () => {
+    const result = checkTransitionPolicy("in_review", "qa", actor("qa"), {});
+    expect(result.allowed).toBe(true);
+  });
+
+  it("qa: in_review → in_progress (reject review, send back to developer)", () => {
+    const result = checkTransitionPolicy("in_review", "in_progress", actor("qa"), {});
+    expect(result.allowed).toBe(true);
+  });
+
+  it("qa: in_review → blocked (QA encounters blocker)", () => {
+    const result = checkTransitionPolicy("in_review", "blocked", actor("qa"), {});
+    expect(result.allowed).toBe(true);
+  });
+});
+
 describe("checkTransitionPolicy – custom rules", () => {
   it("accepts custom rules array", () => {
     const customRules = [
