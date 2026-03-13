@@ -14,6 +14,8 @@ import { Button } from "@/components/ui/button";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { AlertCircle, Check, ExternalLink, Github, GitBranch, Loader2, Plus, Trash2, X } from "lucide-react";
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
 import { ChoosePathButton } from "./PathInstructionsModal";
 import { DraftInput } from "./agent-config-primitives";
 import { InlineEditor } from "./InlineEditor";
@@ -34,6 +36,8 @@ interface ProjectPropertiesProps {
   onUpdate?: (data: Record<string, unknown>) => void;
   onFieldUpdate?: (field: ProjectConfigFieldKey, data: Record<string, unknown>) => void;
   getFieldSaveState?: (field: ProjectConfigFieldKey) => ProjectFieldSaveState;
+  onDelete?: () => void;
+  isDeleting?: boolean;
 }
 
 export type ProjectFieldSaveState = "idle" | "saving" | "saved" | "error";
@@ -152,7 +156,7 @@ function ProjectStatusPicker({ status, onChange }: { status: string; onChange: (
   );
 }
 
-export function ProjectProperties({ project, onUpdate, onFieldUpdate, getFieldSaveState }: ProjectPropertiesProps) {
+export function ProjectProperties({ project, onUpdate, onFieldUpdate, getFieldSaveState, onDelete, isDeleting }: ProjectPropertiesProps) {
   const { selectedCompanyId } = useCompany();
   const queryClient = useQueryClient();
   const [goalOpen, setGoalOpen] = useState(false);
@@ -161,6 +165,8 @@ export function ProjectProperties({ project, onUpdate, onFieldUpdate, getFieldSa
   const [workspaceCwd, setWorkspaceCwd] = useState("");
   const [workspaceRepoUrl, setWorkspaceRepoUrl] = useState("");
   const [workspaceError, setWorkspaceError] = useState<string | null>(null);
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
+  const [deleteConfirmText, setDeleteConfirmText] = useState("");
 
   const commitField = (field: ProjectConfigFieldKey, data: Record<string, unknown>) => {
     if (onFieldUpdate) {
@@ -204,7 +210,8 @@ export function ProjectProperties({ project, onUpdate, onFieldUpdate, getFieldSa
   };
 
   const invalidateProject = () => {
-    queryClient.invalidateQueries({ queryKey: queryKeys.projects.detail(project.id) });
+    // Use prefix match so both UUID and URL-key based query keys are invalidated
+    queryClient.invalidateQueries({ queryKey: ["projects", "detail"] });
     if (selectedCompanyId) {
       queryClient.invalidateQueries({ queryKey: queryKeys.projects.list(selectedCompanyId) });
     }
@@ -709,6 +716,77 @@ export function ProjectProperties({ project, onUpdate, onFieldUpdate, getFieldSa
             <p className="text-xs text-destructive">Failed to update workspace.</p>
           )}
         </div>
+
+        {onDelete && (
+          <>
+            <Separator className="my-4" />
+            <div className="space-y-2 py-1">
+              <p className="text-xs text-muted-foreground">Danger Zone</p>
+              <Button
+                variant="outline"
+                size="xs"
+                className="h-7 px-2.5 border-destructive/40 text-destructive hover:bg-destructive/10 hover:text-destructive"
+                onClick={() => {
+                  setDeleteConfirmText("");
+                  setDeleteDialogOpen(true);
+                }}
+              >
+                <Trash2 className="h-3 w-3 mr-1.5" />
+                Delete project
+              </Button>
+            </div>
+          </>
+        )}
+
+        <Dialog open={deleteDialogOpen} onOpenChange={(open) => {
+          setDeleteDialogOpen(open);
+          if (!open) setDeleteConfirmText("");
+        }}>
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle>Delete project</DialogTitle>
+              <DialogDescription>
+                This will permanently delete <strong>{project.name}</strong> and all its data. This cannot be undone.
+              </DialogDescription>
+            </DialogHeader>
+            <div className="space-y-2">
+              <p className="text-sm text-muted-foreground">
+                Type <span className="font-mono font-medium text-foreground">{project.name}</span> to confirm.
+              </p>
+              <Input
+                value={deleteConfirmText}
+                onChange={(e) => setDeleteConfirmText(e.target.value)}
+                placeholder={project.name}
+                autoFocus
+              />
+            </div>
+            <DialogFooter>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => {
+                  setDeleteDialogOpen(false);
+                  setDeleteConfirmText("");
+                }}
+              >
+                Cancel
+              </Button>
+              <Button
+                variant="destructive"
+                size="sm"
+                disabled={deleteConfirmText !== project.name || isDeleting}
+                onClick={() => {
+                  onDelete?.();
+                  setDeleteDialogOpen(false);
+                  setDeleteConfirmText("");
+                }}
+              >
+                {isDeleting ? <Loader2 className="h-3.5 w-3.5 animate-spin mr-1.5" /> : null}
+                Delete project
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
 
         {SHOW_EXPERIMENTAL_ISSUE_WORKTREE_UI && (
           <>

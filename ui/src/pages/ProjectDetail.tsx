@@ -244,6 +244,17 @@ export function ProjectDetail() {
     onSuccess: invalidateProject,
   });
 
+  const deleteProject = useMutation({
+    mutationFn: () => projectsApi.remove(projectLookupRef, resolvedCompanyId ?? lookupCompanyId),
+    onSuccess: () => {
+      if (resolvedCompanyId) {
+        queryClient.invalidateQueries({ queryKey: queryKeys.projects.list(resolvedCompanyId) });
+      }
+      navigate("/projects");
+    },
+  });
+
+
   const uploadImage = useMutation({
     mutationFn: async (file: File) => {
       if (!resolvedCompanyId) throw new Error("No company selected");
@@ -399,6 +410,8 @@ export function ProjectDetail() {
             onUpdate={(data) => updateProject.mutate(data)}
             onFieldUpdate={updateProjectField}
             getFieldSaveState={(field) => fieldSaveStates[field] ?? "idle"}
+            onDelete={() => deleteProject.mutate()}
+            isDeleting={deleteProject.isPending}
           />
         </div>
       )}

@@ -28,6 +28,7 @@ export function Projects() {
     enabled: !!selectedCompanyId,
   });
 
+
   if (!selectedCompanyId) {
     return <EmptyState icon={Hexagon} message="Select a company to view projects." />;
   }
