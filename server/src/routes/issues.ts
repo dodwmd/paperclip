@@ -1106,7 +1106,7 @@ export function issueRoutes(db: Db, storage: StorageService) {
     // Only checks whether this role CAN EVER check out issues, not the current state.
     if (isEnforcementActive(req) && req.actor.type === "agent") {
       const actorRole = await resolveActorRole(req);
-      const checkoutCapableRoles = ["engineer", "cto"];
+      const checkoutCapableRoles = ["engineer", "cto", "pm", "researcher", "general"];
       if (!checkoutCapableRoles.includes(actorRole ?? "general")) {
         throw new HttpError(422, `Role '${actorRole ?? "general"}' cannot check out issues`, {
           code: "forbidden_role",
