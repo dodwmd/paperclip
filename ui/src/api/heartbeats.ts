@@ -3,6 +3,7 @@ import type {
   HeartbeatRunEvent,
   InstanceSchedulerHeartbeatAgent,
   InstanceMcpServersData,
+  InstanceMcpCatalogEntry,
 } from "@paperclipai/shared";
 import { api } from "./client";
 
@@ -55,4 +56,14 @@ export const heartbeatsApi = {
     api.get<InstanceSchedulerHeartbeatAgent[]>("/instance/scheduler-heartbeats"),
   listInstanceMcpServers: () =>
     api.get<InstanceMcpServersData>("/instance/mcp-servers"),
+  listMcpCatalog: () =>
+    api.get<InstanceMcpCatalogEntry[]>("/instance/mcp-catalog"),
+  createMcpCatalogEntry: (data: { name: string; config: Record<string, unknown>; isDefault?: boolean }) =>
+    api.post<InstanceMcpCatalogEntry>("/instance/mcp-catalog", data),
+  updateMcpCatalogEntry: (id: string, data: Partial<{ name: string; config: Record<string, unknown>; isDefault: boolean }>) =>
+    api.patch<InstanceMcpCatalogEntry>(`/instance/mcp-catalog/${id}`, data),
+  deleteMcpCatalogEntry: (id: string) =>
+    api.delete<void>(`/instance/mcp-catalog/${id}`),
+  applyMcpCatalogDefaults: () =>
+    api.post<{ updatedAgents: number }>("/instance/mcp-catalog/apply-defaults", {}),
 };

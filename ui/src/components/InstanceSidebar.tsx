@@ -1,4 +1,4 @@
-import { Clock3, Plug, Settings } from "lucide-react";
+import { Clock3, Database, Plug, Settings } from "lucide-react";
 import { SidebarNavItem } from "./SidebarNavItem";
 
 export function InstanceSidebar() {
@@ -15,6 +15,7 @@ export function InstanceSidebar() {
         <div className="flex flex-col gap-0.5">
           <SidebarNavItem to="/instance/settings" label="Heartbeats" icon={Clock3} />
           <SidebarNavItem to="/instance/mcps" label="MCPs" icon={Plug} />
+          <SidebarNavItem to="/instance/database" label="Database" icon={Database} />
         </div>
       </nav>
     </aside>

@@ -108,6 +108,7 @@ export type {
   InstanceMcpServerAgent,
   InstanceMcpServerEntry,
   InstanceMcpServersData,
+  InstanceMcpCatalogEntry,
   LiveEvent,
   DashboardSummary,
   ActivityEvent,

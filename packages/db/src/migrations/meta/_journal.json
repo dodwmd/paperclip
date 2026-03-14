@@ -260,6 +260,13 @@
       "when": 1742083200000,
       "tag": "9008_heartbeat_run_tool_calls",
       "breakpoints": true
+    },
+    {
+      "idx": 9009,
+      "version": "7",
+      "when": 1742169600000,
+      "tag": "9009_instance_mcp_catalog",
+      "breakpoints": true
     }
   ]
 }

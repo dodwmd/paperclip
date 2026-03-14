@@ -148,3 +148,12 @@ export interface InstanceMcpServersData {
   mcpServers: InstanceMcpServerEntry[];
   allAgents: InstanceMcpServerAgent[];
 }
+
+export interface InstanceMcpCatalogEntry {
+  id: string;
+  name: string;
+  config: Record<string, unknown>;
+  isDefault: boolean;
+  createdAt: Date;
+  updatedAt: Date;
+}

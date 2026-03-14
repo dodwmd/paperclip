@@ -3,7 +3,7 @@ import { generateKeyPairSync, randomUUID } from "node:crypto";
 import fs from "node:fs/promises";
 import path from "node:path";
 import type { Db } from "@paperclipai/db";
-import { agents as agentsTable, companies, heartbeatRuns } from "@paperclipai/db";
+import { agents as agentsTable, companies, heartbeatRuns, instanceMcpCatalog } from "@paperclipai/db";
 import { and, desc, eq, inArray, not, sql } from "drizzle-orm";
 import {
   createAgentKeySchema,
@@ -16,6 +16,7 @@ import {
   type InstanceSchedulerHeartbeatAgent,
   type InstanceMcpServerAgent,
   type InstanceMcpServersData,
+  type InstanceMcpCatalogEntry,
   updateAgentPermissionsSchema,
   updateAgentInstructionsPathSchema,
   wakeAgentSchema,
@@ -628,6 +629,99 @@ export function agentRoutes(db: Db) {
     res.json({ mcpServers, allAgents } satisfies InstanceMcpServersData);
   });
 
+  router.get("/instance/mcp-catalog", async (req, res) => {
+    assertBoard(req);
+    const entries = await db
+      .select()
+      .from(instanceMcpCatalog)
+      .orderBy(instanceMcpCatalog.name);
+    res.json(entries satisfies InstanceMcpCatalogEntry[]);
+  });
+
+  router.post("/instance/mcp-catalog", async (req, res) => {
+    assertBoard(req);
+    const { name, config, isDefault } = req.body as {
+      name: string;
+      config: Record<string, unknown>;
+      isDefault?: boolean;
+    };
+    if (!name || typeof config !== "object" || config === null) {
+      res.status(400).json({ error: "name and config are required" });
+      return;
+    }
+    const [entry] = await db
+      .insert(instanceMcpCatalog)
+      .values({ name, config, isDefault: isDefault ?? false })
+      .returning();
+    res.status(201).json(entry satisfies InstanceMcpCatalogEntry);
+  });
+
+  router.patch("/instance/mcp-catalog/:id", async (req, res) => {
+    assertBoard(req);
+    const id = req.params.id as string;
+    const { name, config, isDefault } = req.body as Partial<{
+      name: string;
+      config: Record<string, unknown>;
+      isDefault: boolean;
+    }>;
+    const updates: Partial<typeof instanceMcpCatalog.$inferInsert> = { updatedAt: new Date() };
+    if (name !== undefined) updates.name = name;
+    if (config !== undefined) updates.config = config;
+    if (isDefault !== undefined) updates.isDefault = isDefault;
+    const [entry] = await db
+      .update(instanceMcpCatalog)
+      .set(updates)
+      .where(eq(instanceMcpCatalog.id, id))
+      .returning();
+    if (!entry) {
+      res.status(404).json({ error: "Catalog entry not found" });
+      return;
+    }
+    res.json(entry satisfies InstanceMcpCatalogEntry);
+  });
+
+  router.delete("/instance/mcp-catalog/:id", async (req, res) => {
+    assertBoard(req);
+    const id = req.params.id as string;
+    await db.delete(instanceMcpCatalog).where(eq(instanceMcpCatalog.id, id));
+    res.status(204).end();
+  });
+
+  router.post("/instance/mcp-catalog/apply-defaults", async (req, res) => {
+    assertBoard(req);
+    const defaults = await db
+      .select()
+      .from(instanceMcpCatalog)
+      .where(eq(instanceMcpCatalog.isDefault, true));
+
+    if (defaults.length === 0) {
+      res.json({ updatedAgents: 0 });
+      return;
+    }
+
+    const defaultMcpMap = Object.fromEntries(defaults.map((e) => [e.name, e.config]));
+
+    const agentRows = await db
+      .select({ id: agentsTable.id, mcpServers: agentsTable.mcpServers })
+      .from(agentsTable)
+      .where(not(eq(agentsTable.status, "terminated")));
+
+    let updatedAgents = 0;
+    for (const agent of agentRows) {
+      const current = (agent.mcpServers ?? {}) as Record<string, unknown>;
+      const hasAll = defaults.every((e) => e.name in current);
+      if (hasAll) continue;
+      const merged = { ...defaultMcpMap, ...current };
+      await db
+        .update(agentsTable)
+        .set({ mcpServers: merged, updatedAt: new Date() })
+        .where(eq(agentsTable.id, agent.id));
+      updatedAgents++;
+    }
+
+    res.json({ updatedAgents });
+  });
+
   router.get("/companies/:companyId/org", async (req, res) => {
     const companyId = req.params.companyId as string;
     assertCompanyAccess(req, companyId);
@@ -850,8 +944,20 @@ export function agentRoutes(db: Db) {
 
     const requiresApproval = company.requireBoardApprovalForNewAgents;
     const status = requiresApproval ? "pending_approval" : "idle";
+
+    const defaultMcpsForHire = await db
+      .select()
+      .from(instanceMcpCatalog)
+      .where(eq(instanceMcpCatalog.isDefault, true));
+    const defaultMcpMapForHire = Object.fromEntries(defaultMcpsForHire.map((e) => [e.name, e.config]));
+    const hireMcpServers = {
+      ...defaultMcpMapForHire,
+      ...((normalizedHireInput.mcpServers ?? {}) as Record<string, unknown>),
+    };
+
     const agent = await svc.create(companyId, {
       ...normalizedHireInput,
+      mcpServers: hireMcpServers,
       status,
       spentMonthlyCents: 0,
       lastHeartbeatAt: null,
@@ -974,9 +1080,20 @@ export function agentRoutes(db: Db) {
       normalizedAdapterConfig,
     );
 
+    const defaultMcpsForCreate = await db
+      .select()
+      .from(instanceMcpCatalog)
+      .where(eq(instanceMcpCatalog.isDefault, true));
+    const defaultMcpMapForCreate = Object.fromEntries(defaultMcpsForCreate.map((e) => [e.name, e.config]));
+    const createMcpServers = {
+      ...defaultMcpMapForCreate,
+      ...((req.body.mcpServers ?? {}) as Record<string, unknown>),
+    };
+
     const agent = await svc.create(companyId, {
       ...req.body,
       adapterConfig: normalizedAdapterConfig,
+      mcpServers: createMcpServers,
       status: "idle",
       spentMonthlyCents: 0,
       lastHeartbeatAt: null,
