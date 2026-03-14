@@ -14,6 +14,8 @@ import {
   resetAgentSessionSchema,
   testAdapterEnvironmentSchema,
   type InstanceSchedulerHeartbeatAgent,
+  type InstanceMcpServerAgent,
+  type InstanceMcpServersData,
   updateAgentPermissionsSchema,
   updateAgentInstructionsPathSchema,
   wakeAgentSchema,
@@ -549,6 +551,81 @@ export function agentRoutes(db: Db) {
       });
 
     res.json(items);
+  });
+
+  router.get("/instance/mcp-servers", async (req, res) => {
+    assertBoard(req);
+
+    const accessConditions = [];
+    if (req.actor.source !== "local_implicit" && !req.actor.isInstanceAdmin) {
+      const allowedCompanyIds = req.actor.companyIds ?? [];
+      if (allowedCompanyIds.length === 0) {
+        res.json({ mcpServers: [], allAgents: [] } satisfies InstanceMcpServersData);
+        return;
+      }
+      accessConditions.push(inArray(agentsTable.companyId, allowedCompanyIds));
+    }
+
+    const rows = await db
+      .select({
+        id: agentsTable.id,
+        companyId: agentsTable.companyId,
+        agentName: agentsTable.name,
+        role: agentsTable.role,
+        title: agentsTable.title,
+        status: agentsTable.status,
+        mcpServers: agentsTable.mcpServers,
+        companyName: companies.name,
+        companyIssuePrefix: companies.issuePrefix,
+      })
+      .from(agentsTable)
+      .innerJoin(companies, eq(agentsTable.companyId, companies.id))
+      .where(
+        and(
+          accessConditions.length > 0 ? and(...accessConditions) : undefined,
+          not(eq(agentsTable.status, "terminated")),
+        ),
+      )
+      .orderBy(companies.name, agentsTable.name);
+
+    const catalogMap = new Map<string, { config: Record<string, unknown>; agents: InstanceMcpServerAgent[] }>();
+    const allAgents: InstanceMcpServerAgent[] = [];
+
+    for (const row of rows) {
+      const agentEntry: InstanceMcpServerAgent = {
+        id: row.id,
+        companyId: row.companyId,
+        companyName: row.companyName,
+        companyIssuePrefix: row.companyIssuePrefix,
+        agentName: row.agentName,
+        agentUrlKey: deriveAgentUrlKey(row.agentName, row.id),
+        role: row.role as InstanceMcpServerAgent["role"],
+        title: row.title,
+        status: row.status as InstanceMcpServerAgent["status"],
+      };
+      allAgents.push(agentEntry);
+
+      const mcpServers = row.mcpServers;
+      if (mcpServers && typeof mcpServers === "object" && !Array.isArray(mcpServers)) {
+        for (const [name, config] of Object.entries(mcpServers)) {
+          if (!catalogMap.has(name)) {
+            catalogMap.set(name, {
+              config: (typeof config === "object" && config !== null && !Array.isArray(config)
+                ? config
+                : {}) as Record<string, unknown>,
+              agents: [],
+            });
+          }
+          catalogMap.get(name)!.agents.push(agentEntry);
+        }
+      }
+    }
+
+    const mcpServers = [...catalogMap.entries()]
+      .map(([name, { config, agents }]) => ({ name, config, assignedAgents: agents }))
+      .sort((a, b) => a.name.localeCompare(b.name));
+
+    res.json({ mcpServers, allAgents } satisfies InstanceMcpServersData);
   });
 
   router.get("/companies/:companyId/org", async (req, res) => {

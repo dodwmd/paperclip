@@ -988,12 +988,23 @@ export function issueService(db: Db) {
         return enriched;
       }
 
+      let checkoutHint: string;
+      if (!expectedStatuses.includes(current.status)) {
+        checkoutHint = `Issue is in '${current.status}' status. Checkout requires one of: [${expectedStatuses.join(", ")}]. The issue may need to be released or reassigned first.`;
+      } else if (current.assigneeAgentId && current.assigneeAgentId !== agentId) {
+        checkoutHint = `Issue is assigned to agent ${current.assigneeAgentId}. Only the assigned agent can checkout this issue. Request a reassignment or pick a different issue.`;
+      } else if (current.checkoutRunId && current.checkoutRunId !== checkoutRunId) {
+        checkoutHint = `Issue is locked to run ${current.checkoutRunId}. Your run (${checkoutRunId ?? "none"}) does not own the checkout. Retry — if the existing run is stale it will be adopted automatically.`;
+      } else {
+        checkoutHint = `Checkout failed due to a concurrent update. Retry the POST /api/issues/${current.id}/checkout request.`;
+      }
       throw conflict("Issue checkout conflict", {
         issueId: current.id,
         status: current.status,
         assigneeAgentId: current.assigneeAgentId,
         checkoutRunId: current.checkoutRunId,
         executionRunId: current.executionRunId,
+        hint: checkoutHint,
       });
     },
 
@@ -1041,6 +1052,16 @@ export function issueService(db: Db) {
         }
       }
 
+      let ownershipHint: string;
+      if (current.status !== "in_progress") {
+        ownershipHint = `Issue is in '${current.status}' status, not 'in_progress'. Call POST /api/issues/${current.id}/checkout to start working on it.`;
+      } else if (current.assigneeAgentId !== actorAgentId) {
+        ownershipHint = `Issue is assigned to agent ${current.assigneeAgentId ?? "nobody"}. Only the assigned agent can perform this action. Request a reassignment if needed.`;
+      } else if (current.checkoutRunId === null) {
+        ownershipHint = `Issue is in_progress but has no active checkout lock. Call POST /api/issues/${current.id}/checkout to acquire the lock before performing this action.`;
+      } else {
+        ownershipHint = `Issue is locked to run ${current.checkoutRunId}. Your run (${actorRunId ?? "none"}) does not own this checkout. Call POST /api/issues/${current.id}/checkout to attempt to re-acquire the lock.`;
+      }
       throw conflict("Issue run ownership conflict", {
         issueId: current.id,
         status: current.status,
@@ -1048,6 +1069,7 @@ export function issueService(db: Db) {
         checkoutRunId: current.checkoutRunId,
         actorAgentId,
         actorRunId,
+        hint: ownershipHint,
       });
     },
 
@@ -1074,6 +1096,7 @@ export function issueService(db: Db) {
           assigneeAgentId: existing.assigneeAgentId,
           checkoutRunId: existing.checkoutRunId,
           actorRunId: actorRunId ?? null,
+          hint: `Issue is locked to run ${existing.checkoutRunId}. Your run (${actorRunId ?? "none"}) does not own the checkout lock. Call POST /api/issues/${existing.id}/checkout first to re-acquire the lock, then release.`,
         });
       }
 

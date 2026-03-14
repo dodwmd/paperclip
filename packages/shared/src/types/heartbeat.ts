@@ -125,3 +125,26 @@ export interface InstanceSchedulerHeartbeatAgent {
   schedulerActive: boolean;
   lastHeartbeatAt: Date | null;
 }
+
+export interface InstanceMcpServerAgent {
+  id: string;
+  companyId: string;
+  companyName: string;
+  companyIssuePrefix: string;
+  agentName: string;
+  agentUrlKey: string;
+  role: AgentRole;
+  title: string | null;
+  status: AgentStatus;
+}
+
+export interface InstanceMcpServerEntry {
+  name: string;
+  config: Record<string, unknown>;
+  assignedAgents: InstanceMcpServerAgent[];
+}
+
+export interface InstanceMcpServersData {
+  mcpServers: InstanceMcpServerEntry[];
+  allAgents: InstanceMcpServerAgent[];
+}

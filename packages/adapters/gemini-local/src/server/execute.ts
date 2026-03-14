@@ -86,12 +86,21 @@ function geminiSkillsHome(home: string): string {
 }
 
 /**
- * Ensure `~/.gemini/settings.json` exists and contains a `model` field.
- * Gemini CLI 0.30.0 crashes at startup (in its clearcut telemetry logger) when
- * the settings file is absent, because the config object is undefined at the
- * point where `logStartSessionEvent` reads `config.model`. This happens before
- * CLI args are applied, so passing `--model` alone does not prevent the crash.
- * Writing the file here ensures the config object is always populated.
+ * Ensure `~/.gemini/settings.json` exists and is configured for Paperclip.
+ *
+ * Two things are enforced on every run:
+ *
+ * 1. `model.name` — Gemini CLI 0.30.0 changed the schema: `model` must be an
+ *    object (`{ "name": "gemini-2.5-pro" }`), not a plain string. The CLI
+ *    crashes at startup in its clearcut telemetry logger when the config object
+ *    is undefined, before CLI args are applied, so `--model` alone doesn't help.
+ *    Old settings files that still store a plain string are migrated here.
+ *
+ * 2. `context.includeDirectories` — Gemini CLI sandboxes file I/O to the CWD
+ *    plus any explicitly listed directories. Agent memory files live under
+ *    `agentHome` (e.g. `~/.paperclip/.../agent-homes/<id>/`), which is outside
+ *    the workspace CWD. Without this entry the CLI rejects every read/write to
+ *    the memory directory with "Path not in workspace".
  */
 async function ensureGeminiSettingsFile(
   onLog: AdapterExecutionContext["onLog"],
@@ -118,11 +127,46 @@ async function ensureGeminiSettingsFile(
     // file absent or invalid JSON — will create/overwrite
   }
 
-  if (typeof settings.model === "string" && settings.model.trim().length > 0) {
-    return; // already has a model; don't overwrite user's choice
+  let dirty = false;
+
+  // Fix 1: migrate model from plain string → { name: "..." } object (0.30.0 schema change).
+  const existingModel = settings.model;
+  if (typeof existingModel === "string" && existingModel.trim().length > 0) {
+    // Old format — upgrade to new object shape.
+    settings.model = { name: existingModel.trim() };
+    dirty = true;
+  } else if (
+    typeof existingModel !== "object" ||
+    existingModel === null ||
+    typeof (existingModel as Record<string, unknown>).name !== "string" ||
+    !(existingModel as Record<string, unknown>).name
+  ) {
+    // Missing or malformed — write fresh.
+    settings.model = { name: model };
+    dirty = true;
   }
 
-  settings.model = model;
+  // Fix 2: add agentHome to context.includeDirectories so Gemini allows R/W
+  // to memory files stored under the agent home (outside workspace CWD).
+  const ctx = (
+    settings.context &&
+    typeof settings.context === "object" &&
+    !Array.isArray(settings.context)
+  )
+    ? settings.context as Record<string, unknown>
+    : ({} as Record<string, unknown>);
+  const includeDirs: string[] = Array.isArray(ctx.includeDirectories)
+    ? [...(ctx.includeDirectories as string[])]
+    : [];
+  if (!includeDirs.includes(agentHome)) {
+    includeDirs.push(agentHome);
+    ctx.includeDirectories = includeDirs;
+    settings.context = ctx;
+    dirty = true;
+  }
+
+  if (!dirty) return;
+
   try {
     await fs.writeFile(settingsPath, JSON.stringify(settings, null, 2) + "\n", "utf8");
   } catch (err) {

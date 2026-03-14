@@ -60,6 +60,7 @@ export const queryKeys = {
   },
   instance: {
     schedulerHeartbeats: ["instance", "scheduler-heartbeats"] as const,
+    mcpServers: ["instance", "mcp-servers"] as const,
   },
   health: ["health"] as const,
   secrets: {

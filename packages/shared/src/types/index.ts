@@ -51,6 +51,9 @@ export type {
   AgentTaskSession,
   AgentWakeupRequest,
   InstanceSchedulerHeartbeatAgent,
+  InstanceMcpServerAgent,
+  InstanceMcpServerEntry,
+  InstanceMcpServersData,
 } from "./heartbeat.js";
 export type { LiveEvent } from "./live.js";
 export type { DashboardSummary } from "./dashboard.js";

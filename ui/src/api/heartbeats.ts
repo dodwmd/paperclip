@@ -2,6 +2,7 @@ import type {
   HeartbeatRun,
   HeartbeatRunEvent,
   InstanceSchedulerHeartbeatAgent,
+  InstanceMcpServersData,
 } from "@paperclipai/shared";
 import { api } from "./client";
 
@@ -52,4 +53,6 @@ export const heartbeatsApi = {
     api.get<LiveRunForIssue[]>(`/companies/${companyId}/live-runs${minCount ? `?minCount=${minCount}` : ""}`),
   listInstanceSchedulerAgents: () =>
     api.get<InstanceSchedulerHeartbeatAgent[]>("/instance/scheduler-heartbeats"),
+  listInstanceMcpServers: () =>
+    api.get<InstanceMcpServersData>("/instance/mcp-servers"),
 };
