@@ -1076,6 +1076,13 @@ function EnvVarEditor({
       withPatch.push({ key: "", source: "plain", plainValue: "", secretId: "" });
     }
     setRows(withPatch);
+    // Don't emit while a row is in mid-switch state (secret mode, key present, no secretId
+    // selected yet). Emitting here would drop the row from the parent value, causing the
+    // useEffect to reset rows from the new (reduced) value — making the key disappear.
+    const updatedRow = withPatch[i];
+    if (updatedRow && updatedRow.source === "secret" && !updatedRow.secretId && updatedRow.key.trim()) {
+      return;
+    }
     emit(withPatch);
   }
 

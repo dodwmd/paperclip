@@ -305,10 +305,15 @@ export async function execute(ctx: AdapterExecutionContext): Promise<AdapterExec
   const apiAccessNote = renderApiAccessNote(env);
   const prompt = `${instructionsPrefix}${paperclipEnvNote}${apiAccessNote}${renderedPrompt}`;
 
+  // When model is "auto" (the default sentinel), omitting --model causes gemini-cli 0.30.0
+  // to crash in its clearcut telemetry logger because the session config has no model set.
+  // Always pass an explicit --model to avoid this, falling back to gemini-2.5-pro.
+  const effectiveModel = (model && model !== DEFAULT_GEMINI_LOCAL_MODEL) ? model : "gemini-2.5-pro";
+
   const buildArgs = (resumeSessionId: string | null) => {
     const args = ["--output-format", "stream-json"];
     if (resumeSessionId) args.push("--resume", resumeSessionId);
-    if (model && model !== DEFAULT_GEMINI_LOCAL_MODEL) args.push("--model", model);
+    args.push("--model", effectiveModel);
     args.push("--approval-mode", "yolo");
     if (sandbox) {
       args.push("--sandbox");
