@@ -1516,7 +1516,9 @@ export function heartbeatService(db: Db) {
         () => resolveDefaultAgentHomeDir(agent.id),
       );
       // Sync DB-configured MCP servers into the agent's Claude Code settings (best-effort)
-      await writeAgentMcpSettings(agentHomeDir, agent.mcpServers ?? undefined).catch(() => {});
+      await writeAgentMcpSettings(agentHomeDir, agent.mcpServers ?? undefined).catch((err) => {
+        logger.warn({ agentId: agent.id, runId: run.id, err }, "Failed to write MCP settings to agent home");
+      });
       const resolvedConfigWithHome = {
         ...resolvedConfig,
         env: { HOME: agentHomeDir, ...((resolvedConfig.env as Record<string, unknown>) ?? {}) },
