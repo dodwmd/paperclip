@@ -24,7 +24,7 @@ import { parseObject, asBoolean, asNumber, appendWithCap, MAX_EXCERPT_BYTES } fr
 import { costService } from "./costs.js";
 import { secretService } from "./secrets.js";
 import { resolveDefaultAgentWorkspaceDir, resolveDefaultAgentHomeDir } from "../home-paths.js";
-import { ensureAgentHomeDir, writeAgentMcpSettings } from "../agent-home.js";
+import { ensureAgentHomeDir, writeAgentMcpSettings, writeAgentGeminiSettings } from "../agent-home.js";
 import { summarizeHeartbeatRunResultJson } from "./heartbeat-run-summary.js";
 import {
   buildWorkspaceReadyComment,
@@ -1515,9 +1515,12 @@ export function heartbeatService(db: Db) {
       const agentHomeDir = await ensureAgentHomeDir(agent.id).catch(
         () => resolveDefaultAgentHomeDir(agent.id),
       );
-      // Sync DB-configured MCP servers into the agent's Claude Code settings (best-effort)
+      // Sync DB-configured MCP servers into the agent's tool-specific settings (best-effort)
       await writeAgentMcpSettings(agentHomeDir, agent.mcpServers ?? undefined).catch((err) => {
-        logger.warn({ agentId: agent.id, runId: run.id, err }, "Failed to write MCP settings to agent home");
+        logger.warn({ agentId: agent.id, runId: run.id, err }, "Failed to write Claude MCP settings to agent home");
+      });
+      await writeAgentGeminiSettings(agentHomeDir, agent.mcpServers ?? undefined).catch((err) => {
+        logger.warn({ agentId: agent.id, runId: run.id, err }, "Failed to write Gemini settings to agent home");
       });
       const resolvedConfigWithHome = {
         ...resolvedConfig,

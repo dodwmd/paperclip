@@ -81,8 +81,8 @@ async function resolvePaperclipSkillsDir(): Promise<string | null> {
   return null;
 }
 
-function geminiSkillsHome(): string {
-  return path.join(os.homedir(), ".gemini", "skills");
+function geminiSkillsHome(home: string): string {
+  return path.join(home, ".gemini", "skills");
 }
 
 /**
@@ -92,11 +92,12 @@ function geminiSkillsHome(): string {
  */
 async function ensureGeminiSkillsInjected(
   onLog: AdapterExecutionContext["onLog"],
+  agentHome: string,
 ): Promise<void> {
   const skillsDir = await resolvePaperclipSkillsDir();
   if (!skillsDir) return;
 
-  const skillsHome = geminiSkillsHome();
+  const skillsHome = geminiSkillsHome(agentHome);
   try {
     await fs.mkdir(skillsHome, { recursive: true });
   } catch (err) {
@@ -164,9 +165,10 @@ export async function execute(ctx: AdapterExecutionContext): Promise<AdapterExec
   const effectiveWorkspaceCwd = useConfiguredInsteadOfAgentHome ? "" : workspaceCwd;
   const cwd = effectiveWorkspaceCwd || configuredCwd || process.cwd();
   await ensureAbsoluteDirectory(cwd, { createIfMissing: true });
-  await ensureGeminiSkillsInjected(onLog);
 
   const envConfig = parseObject(config.env);
+  const agentHome = asString(envConfig.HOME, os.homedir());
+  await ensureGeminiSkillsInjected(onLog, agentHome);
   const hasExplicitApiKey =
     typeof envConfig.PAPERCLIP_API_KEY === "string" && envConfig.PAPERCLIP_API_KEY.trim().length > 0;
   const env: Record<string, string> = { ...buildPaperclipEnv(agent) };
@@ -240,25 +242,37 @@ export async function execute(ctx: AdapterExecutionContext): Promise<AdapterExec
   }
 
   const instructionsFilePath = asString(config.instructionsFilePath, "").trim();
-  const instructionsDir = instructionsFilePath ? `${path.dirname(instructionsFilePath)}/` : "";
+  const instructionsDir = instructionsFilePath ? path.dirname(instructionsFilePath) : "";
+  const SUPPLEMENTAL_INSTRUCTION_FILES = ["HEARTBEAT.md", "SOUL.md", "TOOLS.md"];
   let instructionsPrefix = "";
   if (instructionsFilePath) {
+    const sections: string[] = [];
     try {
-      const instructionsContents = await fs.readFile(instructionsFilePath, "utf8");
-      instructionsPrefix =
-        `${instructionsContents}\n\n` +
-        `The above agent instructions were loaded from ${instructionsFilePath}. ` +
-        `Resolve any relative file references from ${instructionsDir}.\n\n`;
-      await onLog(
-        "stderr",
-        `[paperclip] Loaded agent instructions file: ${instructionsFilePath}\n`,
-      );
+      const contents = await fs.readFile(instructionsFilePath, "utf8");
+      sections.push(contents);
+      await onLog("stderr", `[paperclip] Loaded agent instructions file: ${instructionsFilePath}\n`);
     } catch (err) {
       const reason = err instanceof Error ? err.message : String(err);
       await onLog(
         "stderr",
         `[paperclip] Warning: could not read agent instructions file "${instructionsFilePath}": ${reason}\n`,
       );
+    }
+    for (const filename of SUPPLEMENTAL_INSTRUCTION_FILES) {
+      const filePath = path.join(instructionsDir, filename);
+      try {
+        const contents = await fs.readFile(filePath, "utf8");
+        sections.push(contents);
+        await onLog("stderr", `[paperclip] Loaded supplemental instructions: ${filePath}\n`);
+      } catch {
+        // silently skip missing files
+      }
+    }
+    if (sections.length > 0) {
+      instructionsPrefix =
+        sections.join("\n\n") +
+        `\n\nThe above agent instructions were loaded from ${instructionsDir}/. ` +
+        `Resolve any relative file references from ${instructionsDir}/.\n\n`;
     }
   }
   const commandNotes = (() => {
@@ -267,8 +281,8 @@ export async function execute(ctx: AdapterExecutionContext): Promise<AdapterExec
     if (!instructionsFilePath) return notes;
     if (instructionsPrefix.length > 0) {
       notes.push(
-        `Loaded agent instructions from ${instructionsFilePath}`,
-        `Prepended instructions + path directive to prompt (relative references from ${instructionsDir}).`,
+        `Loaded agent instructions from ${instructionsDir}/ (AGENTS.md + supplemental files)`,
+        `Prepended all instructions + path directive to prompt (relative references from ${instructionsDir}/).`,
       );
       return notes;
     }

@@ -123,6 +123,36 @@ export async function writeAgentMcpSettings(
   await fs.writeFile(settingsPath, JSON.stringify(merged, null, 2), "utf-8");
 }
 
+/**
+ * Write/merge the agent's mcpServers config into <homeDir>/.gemini/settings.json.
+ * Only the mcpServers key is touched — other settings in the file are preserved.
+ * No-op if mcpServers is null/undefined.
+ */
+export async function writeAgentGeminiSettings(
+  homeDir: string,
+  mcpServers: Record<string, unknown> | null | undefined,
+): Promise<void> {
+  if (mcpServers == null) return;
+
+  const geminiDir = path.join(homeDir, ".gemini");
+  await fs.mkdir(geminiDir, { recursive: true });
+
+  const settingsPath = path.join(geminiDir, "settings.json");
+  let existing: Record<string, unknown> = {};
+  try {
+    const raw = await fs.readFile(settingsPath, "utf-8");
+    const parsed = JSON.parse(raw) as unknown;
+    if (typeof parsed === "object" && parsed !== null && !Array.isArray(parsed)) {
+      existing = parsed as Record<string, unknown>;
+    }
+  } catch {
+    // File missing or invalid JSON — start fresh
+  }
+
+  const merged = { ...existing, mcpServers };
+  await fs.writeFile(settingsPath, JSON.stringify(merged, null, 2), "utf-8");
+}
+
 /** Write an instruction file to the agent's home dir (creates dir if needed). */
 export async function writeInstructionFile(
   agentId: string,
