@@ -561,3 +561,159 @@ describe("POST /issues/:id/blockers — invalid blockerId", () => {
     expect(res.status).toBe(400);
   });
 });
+// ── Integration tests: PATCH /issues/:id with blockedByIds ──────────────────
+
+describe("PATCH /issues/:id — blockedByIds persistence", () => {
+  it("persists blockedByIds array via PATCH and returns updated issue", async () => {
+    // Mock the update service to accept blockedByIds
+    mockIssueSvc.update.mockResolvedValue({
+      ...baseIssue,
+      blockedByIds: [BLOCKER_UUID, BLOCKER_UUID_2],
+    });
+    mockIssueSvc.getDependencies.mockResolvedValue({
+      blockedBy: [
+        { id: BLOCKER_UUID, identifier: "TEST-2", title: "Blocker 1", status: "todo" },
+        { id: BLOCKER_UUID_2, identifier: "TEST-3", title: "Blocker 2", status: "in_progress" },
+      ],
+      blocks: [],
+    });
+
+    const app = createApp();
+    const res = await request(app)
+      .patch("/api/issues/issue-1")
+      .set("X-Paperclip-Run-Id", "run-1")
+      .send({ blockedByIds: [BLOCKER_UUID, BLOCKER_UUID_2] });
+
+    expect(res.status).toBe(200);
+    expect(mockIssueSvc.update).toHaveBeenCalledWith(
+      "issue-1",
+      expect.objectContaining({ blockedByIds: [BLOCKER_UUID, BLOCKER_UUID_2] }),
+      expect.objectContaining({ agentId: AGENT_UUID }),
+    );
+  });
+
+  it("removes all blockers when blockedByIds is an empty array", async () => {
+    mockIssueSvc.update.mockResolvedValue({ ...baseIssue });
+    mockIssueSvc.getDependencies.mockResolvedValue({ blockedBy: [], blocks: [] });
+
+    const app = createApp();
+    const res = await request(app)
+      .patch("/api/issues/issue-1")
+      .set("X-Paperclip-Run-Id", "run-1")
+      .send({ blockedByIds: [] });
+
+    expect(res.status).toBe(200);
+    expect(mockIssueSvc.update).toHaveBeenCalledWith(
+      "issue-1",
+      expect.objectContaining({ blockedByIds: [] }),
+      expect.any(Object),
+    );
+  });
+
+  it("returns 422 when blockedByIds contains invalid issue IDs", async () => {
+    mockIssueSvc.update.mockRejectedValue(
+      new HttpError(422, "One or more blocker issues not found"),
+    );
+
+    const app = createApp();
+    const res = await request(app)
+      .patch("/api/issues/issue-1")
+      .set("X-Paperclip-Run-Id", "run-1")
+      .send({ blockedByIds: ["00000000-0000-4000-8000-999999999999"] });
+
+    expect(res.status).toBe(422);
+    expect(res.body.error).toMatch(/not found/i);
+  });
+
+  it("returns 422 when blockedByIds would create a cycle", async () => {
+    mockIssueSvc.update.mockRejectedValue(
+      new HttpError(422, "Adding this dependency would create a circular chain"),
+    );
+
+    const app = createApp();
+    const res = await request(app)
+      .patch("/api/issues/issue-1")
+      .set("X-Paperclip-Run-Id", "run-1")
+      .send({ blockedByIds: [BLOCKER_UUID] });
+
+    expect(res.status).toBe(422);
+    expect(res.body.error).toMatch(/circular/i);
+  });
+
+  it("returns 422 when blockedByIds contains the issue itself (self-dependency)", async () => {
+    mockIssueSvc.update.mockRejectedValue(
+      new HttpError(422, "An issue cannot depend on itself"),
+    );
+
+    const app = createApp();
+    const res = await request(app)
+      .patch("/api/issues/issue-1")
+      .set("X-Paperclip-Run-Id", "run-1")
+      .send({ blockedByIds: ["issue-1"] });
+
+    expect(res.status).toBe(422);
+    expect(res.body.error).toMatch(/cannot depend on itself/i);
+  });
+
+  it("deduplicates blockedByIds array before persisting", async () => {
+    // The service should deduplicate the array internally
+    mockIssueSvc.update.mockResolvedValue({ ...baseIssue });
+
+    const app = createApp();
+    const res = await request(app)
+      .patch("/api/issues/issue-1")
+      .set("X-Paperclip-Run-Id", "run-1")
+      .send({ blockedByIds: [BLOCKER_UUID, BLOCKER_UUID, BLOCKER_UUID_2] });
+
+    expect(res.status).toBe(200);
+    expect(mockIssueSvc.update).toHaveBeenCalled();
+  });
+
+  it("passes actor context when updating blockedByIds", async () => {
+    mockIssueSvc.update.mockResolvedValue({ ...baseIssue });
+
+    const app = createApp();
+    await request(app)
+      .patch("/api/issues/issue-1")
+      .set("X-Paperclip-Run-Id", "run-1")
+      .send({ blockedByIds: [BLOCKER_UUID] });
+
+    expect(mockIssueSvc.update).toHaveBeenCalledWith(
+      "issue-1",
+      expect.any(Object),
+      expect.objectContaining({
+        agentId: AGENT_UUID,
+        userId: null,
+      }),
+    );
+  });
+
+  it("allows combining blockedByIds with other fields in PATCH", async () => {
+    mockIssueSvc.update.mockResolvedValue({
+      ...baseIssue,
+      title: "Updated title",
+      status: "blocked",
+    });
+
+    const app = createApp();
+    const res = await request(app)
+      .patch("/api/issues/issue-1")
+      .set("X-Paperclip-Run-Id", "run-1")
+      .send({
+        title: "Updated title",
+        status: "blocked",
+        blockedByIds: [BLOCKER_UUID],
+      });
+
+    expect(res.status).toBe(200);
+    expect(mockIssueSvc.update).toHaveBeenCalledWith(
+      "issue-1",
+      expect.objectContaining({
+        title: "Updated title",
+        status: "blocked",
+        blockedByIds: [BLOCKER_UUID],
+      }),
+      expect.any(Object),
+    );
+  });
+});
