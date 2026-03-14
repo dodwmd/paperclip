@@ -947,15 +947,18 @@ export function heartbeatService(db: Db) {
     }
   }
 
-  async function reapOrphanedRuns(opts?: { staleThresholdMs?: number }) {
+  async function reapOrphanedRuns(opts?: { staleThresholdMs?: number; statuses?: Array<"queued" | "running"> }) {
     const staleThresholdMs = opts?.staleThresholdMs ?? 0;
+    const statuses = opts?.statuses ?? (["queued", "running"] as Array<"queued" | "running">);
     const now = new Date();
 
-    // Find all runs in "queued" or "running" state
+    // Find all runs in the specified statuses (default: queued + running)
+    // Note: queued runs are never in runningProcesses by design, so the periodic
+    // reap should only check "running" to avoid false "server restarted" failures.
     const activeRuns = await db
       .select()
       .from(heartbeatRuns)
-      .where(inArray(heartbeatRuns.status, ["queued", "running"]));
+      .where(inArray(heartbeatRuns.status, statuses));
 
     const reaped: string[] = [];
 

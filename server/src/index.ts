@@ -574,9 +574,11 @@ export async function startServer(): Promise<StartedServer> {
           logger.error({ err }, "heartbeat timer tick failed");
         });
   
-      // Periodically reap orphaned runs (5-min staleness threshold)
+      // Periodically reap orphaned runs (5-min staleness threshold, running only).
+      // Queued runs are never in runningProcesses by design — they're just waiting
+      // for capacity and must not be mistaken for orphans.
       void heartbeat
-        .reapOrphanedRuns({ staleThresholdMs: 5 * 60 * 1000 })
+        .reapOrphanedRuns({ staleThresholdMs: 5 * 60 * 1000, statuses: ["running"] })
         .catch((err) => {
           logger.error({ err }, "periodic reap of orphaned heartbeat runs failed");
         });
