@@ -9,6 +9,7 @@ export function parseClaudeStreamJson(stdout: string) {
   let model = "";
   let finalResult: Record<string, unknown> | null = null;
   const assistantTexts: string[] = [];
+  const toolCalls: Record<string, number> = {};
 
   for (const rawLine of stdout.split(/\r?\n/)) {
     const line = rawLine.trim();
@@ -30,9 +31,13 @@ export function parseClaudeStreamJson(stdout: string) {
       for (const entry of content) {
         if (typeof entry !== "object" || entry === null || Array.isArray(entry)) continue;
         const block = entry as Record<string, unknown>;
-        if (asString(block.type, "") === "text") {
+        const blockType = asString(block.type, "");
+        if (blockType === "text") {
           const text = asString(block.text, "");
           if (text) assistantTexts.push(text);
+        } else if (blockType === "tool_use") {
+          const name = asString(block.name, "");
+          if (name) toolCalls[name] = (toolCalls[name] ?? 0) + 1;
         }
       }
       continue;
@@ -44,12 +49,15 @@ export function parseClaudeStreamJson(stdout: string) {
     }
   }
 
+  const toolCallsResult = Object.keys(toolCalls).length > 0 ? toolCalls : null;
+
   if (!finalResult) {
     return {
       sessionId,
       model,
       costUsd: null as number | null,
       usage: null as UsageSummary | null,
+      toolCalls: toolCallsResult as Record<string, number> | null,
       summary: assistantTexts.join("\n\n").trim(),
       resultJson: null as Record<string, unknown> | null,
     };
@@ -70,6 +78,7 @@ export function parseClaudeStreamJson(stdout: string) {
     model,
     costUsd,
     usage,
+    toolCalls: toolCallsResult as Record<string, number> | null,
     summary,
     resultJson: finalResult,
   };

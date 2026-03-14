@@ -103,6 +103,7 @@ export function issueRoutes(db: Db, storage: StorageService) {
       if (allowedByGrant) return;
       const actorAgent = await agentsSvc.getById(req.actor.agentId);
       if (actorAgent && actorAgent.companyId === companyId && canCreateAgentsLegacy(actorAgent)) return;
+      if (actorAgent && actorAgent.companyId === companyId && ["ceo", "cto", "pm", "general", "researcher"].includes(actorAgent.role)) return;
       throw forbidden("Missing permission: tasks:assign");
     }
     throw unauthorized();

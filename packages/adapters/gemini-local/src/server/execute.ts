@@ -86,6 +86,54 @@ function geminiSkillsHome(home: string): string {
 }
 
 /**
+ * Ensure `~/.gemini/settings.json` exists and contains a `model` field.
+ * Gemini CLI 0.30.0 crashes at startup (in its clearcut telemetry logger) when
+ * the settings file is absent, because the config object is undefined at the
+ * point where `logStartSessionEvent` reads `config.model`. This happens before
+ * CLI args are applied, so passing `--model` alone does not prevent the crash.
+ * Writing the file here ensures the config object is always populated.
+ */
+async function ensureGeminiSettingsFile(
+  onLog: AdapterExecutionContext["onLog"],
+  agentHome: string,
+  model: string,
+): Promise<void> {
+  const settingsDir = path.join(agentHome, ".gemini");
+  const settingsPath = path.join(settingsDir, "settings.json");
+
+  try {
+    await fs.mkdir(settingsDir, { recursive: true });
+  } catch {
+    // already exists
+  }
+
+  let settings: Record<string, unknown> = {};
+  try {
+    const raw = await fs.readFile(settingsPath, "utf8");
+    const parsed = JSON.parse(raw);
+    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+      settings = parsed as Record<string, unknown>;
+    }
+  } catch {
+    // file absent or invalid JSON — will create/overwrite
+  }
+
+  if (typeof settings.model === "string" && settings.model.trim().length > 0) {
+    return; // already has a model; don't overwrite user's choice
+  }
+
+  settings.model = model;
+  try {
+    await fs.writeFile(settingsPath, JSON.stringify(settings, null, 2) + "\n", "utf8");
+  } catch (err) {
+    await onLog(
+      "stderr",
+      `[paperclip] Warning: could not write Gemini settings file ${settingsPath}: ${err instanceof Error ? err.message : String(err)}\n`,
+    );
+  }
+}
+
+/**
  * Inject Paperclip skills directly into `~/.gemini/skills/` via symlinks.
  * This avoids needing GEMINI_CLI_HOME overrides, so the CLI naturally finds
  * both its auth credentials and the injected skills in the real home directory.
@@ -147,6 +195,11 @@ export async function execute(ctx: AdapterExecutionContext): Promise<AdapterExec
   );
   const command = asString(config.command, "gemini");
   const model = asString(config.model, DEFAULT_GEMINI_LOCAL_MODEL).trim();
+  // When model is "auto" (the default sentinel), omitting --model causes gemini-cli 0.30.0
+  // to crash in its clearcut telemetry logger because the session config has no model set.
+  // Always resolve to an explicit model name early so we can also write it to the settings
+  // file before invoking gemini — the telemetry crash happens before CLI args are applied.
+  const effectiveModel = (model && model !== DEFAULT_GEMINI_LOCAL_MODEL) ? model : "gemini-2.5-pro";
   const sandbox = asBoolean(config.sandbox, false);
 
   const workspaceContext = parseObject(context.paperclipWorkspace);
@@ -168,6 +221,7 @@ export async function execute(ctx: AdapterExecutionContext): Promise<AdapterExec
 
   const envConfig = parseObject(config.env);
   const agentHome = asString(envConfig.HOME, os.homedir());
+  await ensureGeminiSettingsFile(onLog, agentHome, effectiveModel);
   await ensureGeminiSkillsInjected(onLog, agentHome);
   const hasExplicitApiKey =
     typeof envConfig.PAPERCLIP_API_KEY === "string" && envConfig.PAPERCLIP_API_KEY.trim().length > 0;
@@ -304,11 +358,6 @@ export async function execute(ctx: AdapterExecutionContext): Promise<AdapterExec
   const paperclipEnvNote = renderPaperclipEnvNote(env);
   const apiAccessNote = renderApiAccessNote(env);
   const prompt = `${instructionsPrefix}${paperclipEnvNote}${apiAccessNote}${renderedPrompt}`;
-
-  // When model is "auto" (the default sentinel), omitting --model causes gemini-cli 0.30.0
-  // to crash in its clearcut telemetry logger because the session config has no model set.
-  // Always pass an explicit --model to avoid this, falling back to gemini-2.5-pro.
-  const effectiveModel = (model && model !== DEFAULT_GEMINI_LOCAL_MODEL) ? model : "gemini-2.5-pro";
 
   const buildArgs = (resumeSessionId: string | null) => {
     const args = ["--output-format", "stream-json"];

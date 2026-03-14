@@ -19,6 +19,7 @@ export const heartbeatRuns = pgTable(
     exitCode: integer("exit_code"),
     signal: text("signal"),
     usageJson: jsonb("usage_json").$type<Record<string, unknown>>(),
+    toolCallsJson: jsonb("tool_calls_json").$type<Record<string, number>>(),
     resultJson: jsonb("result_json").$type<Record<string, unknown>>(),
     sessionIdBefore: text("session_id_before"),
     sessionIdAfter: text("session_id_after"),

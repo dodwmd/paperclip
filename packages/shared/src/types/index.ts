@@ -43,6 +43,7 @@ export type {
   SecretProviderDescriptor,
 } from "./secrets.js";
 export type { CostEvent, CostSummary, CostByAgent, CostByProject } from "./cost.js";
+export type { ToolUsageItem, ToolUsageByAgent, RunStats } from "./metrics.js";
 export type {
   HeartbeatRun,
   HeartbeatRunEvent,

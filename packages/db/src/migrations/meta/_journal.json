@@ -253,6 +253,13 @@
       "when": 1741996800000,
       "tag": "9007_company_kanban_git",
       "breakpoints": true
+    },
+    {
+      "idx": 9008,
+      "version": "7",
+      "when": 1742083200000,
+      "tag": "9008_heartbeat_run_tool_calls",
+      "breakpoints": true
     }
   ]
 }

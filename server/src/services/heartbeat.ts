@@ -1648,6 +1648,7 @@ export function heartbeatService(db: Db) {
         exitCode: adapterResult.exitCode,
         signal: adapterResult.signal,
         usageJson,
+        toolCallsJson: adapterResult.toolCalls ?? null,
         resultJson: adapterResult.resultJson ?? null,
         sessionIdAfter: nextSessionState.displayId ?? nextSessionState.legacySessionId,
         stdoutExcerpt,

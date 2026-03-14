@@ -1,4 +1,4 @@
-import { Router } from "express";
+import { Router, type Request } from "express";
 import type { Db } from "@paperclipai/db";
 import {
   companyPortabilityExportSchema,
@@ -10,7 +10,7 @@ import {
 } from "@paperclipai/shared";
 import { forbidden } from "../errors.js";
 import { validate } from "../middleware/validate.js";
-import { accessService, companyPortabilityService, companyService, logActivity, syncKanbanConfig, checkKanbanRemoteSha } from "../services/index.js";
+import { accessService, agentService, companyPortabilityService, companyService, logActivity, syncKanbanConfig, checkKanbanRemoteSha } from "../services/index.js";
 import { assertBoard, assertCompanyAccess, getActorInfo } from "./authz.js";
 import { logger } from "../middleware/logger.js";
 
@@ -19,6 +19,16 @@ export function companyRoutes(db: Db) {
   const svc = companyService(db);
   const portability = companyPortabilityService(db);
   const access = accessService(db);
+  const agents = agentService(db);
+
+  async function assertBoardOrCeoAgent(req: Request, companyId: string) {
+    if (req.actor.type === "board") return;
+    if (req.actor.type === "agent" && req.actor.agentId) {
+      const agent = await agents.getById(req.actor.agentId);
+      if (agent && agent.companyId === companyId && agent.role === "ceo") return;
+    }
+    throw forbidden("Board or CEO agent access required");
+  }
 
   router.get("/", async (req, res) => {
     assertBoard(req);
@@ -151,8 +161,8 @@ export function companyRoutes(db: Db) {
   // ── Kanban config ──────────────────────────────────────────────────────────
 
   router.get("/:companyId/kanban-config", async (req, res) => {
-    assertBoard(req);
     const companyId = req.params.companyId as string;
+    await assertBoardOrCeoAgent(req, companyId);
     assertCompanyAccess(req, companyId);
     const company = await svc.getById(companyId);
     if (!company) {
@@ -166,8 +176,8 @@ export function companyRoutes(db: Db) {
   // The body may be null (to reset kanban config to defaults), which validate() does not support
   // since it calls schema.parse(req.body) unconditionally on a non-nullable schema.
   router.put("/:companyId/kanban-config", async (req, res) => {
-    assertBoard(req);
     const companyId = req.params.companyId as string;
+    await assertBoardOrCeoAgent(req, companyId);
     assertCompanyAccess(req, companyId);
 
     const existing = await svc.getById(companyId);
@@ -198,10 +208,11 @@ export function companyRoutes(db: Db) {
         res.status(404).json({ error: "Company not found" });
         return;
       }
+      const actorInfo = getActorInfo(req);
       await logActivity(db, {
         companyId,
-        actorType: "user",
-        actorId: req.actor.userId ?? "board",
+        actorType: actorInfo.actorType,
+        actorId: actorInfo.actorId,
         action: "company.kanban_config_updated",
         entityType: "company",
         entityId: companyId,

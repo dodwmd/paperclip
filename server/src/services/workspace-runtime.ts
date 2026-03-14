@@ -366,7 +366,11 @@ export async function realizeExecutionWorkspace(input: {
   const worktreePath = path.join(worktreeParentDir, branchName);
   const baseRef = asString(rawStrategy.baseRef, input.base.repoRef ?? "HEAD");
 
-  await fs.mkdir(worktreeParentDir, { recursive: true });
+  await fs.mkdir(path.dirname(worktreePath), { recursive: true });
+
+  // Prune stale worktree references (e.g. from directories deleted externally) before
+  // inspecting or creating worktrees, so git's own state is consistent.
+  await runGit(["worktree", "prune"], repoRoot);
 
   const existingWorktree = await directoryExists(worktreePath);
   if (existingWorktree) {
@@ -395,7 +399,13 @@ export async function realizeExecutionWorkspace(input: {
     throw new Error(`Configured worktree path "${worktreePath}" already exists and is not a git worktree.`);
   }
 
-  await runGit(["worktree", "add", "-B", branchName, worktreePath, baseRef], repoRoot);
+  // If the branch already exists (e.g. directory was deleted but branch survived), check it
+  // out as-is rather than resetting it to baseRef with -B, which would discard prior work.
+  const branchExists = await runGit(["rev-parse", "--verify", branchName], repoRoot).catch(() => null);
+  const worktreeAddArgs = branchExists !== null
+    ? ["worktree", "add", worktreePath, branchName]
+    : ["worktree", "add", "-b", branchName, worktreePath, baseRef];
+  await runGit(worktreeAddArgs, repoRoot);
   await provisionExecutionWorktree({
     strategy: rawStrategy,
     base: input.base,
