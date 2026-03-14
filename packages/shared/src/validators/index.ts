@@ -75,6 +75,9 @@ export {
   linkIssueApprovalSchema,
   createIssueAttachmentMetadataSchema,
   addIssueDependencySchema,
+  issueDocumentFormatSchema,
+  issueDocumentKeySchema,
+  upsertIssueDocumentSchema,
   type CreateIssue,
   type CreateIssueLabel,
   type UpdateIssue,
@@ -84,6 +87,8 @@ export {
   type LinkIssueApproval,
   type CreateIssueAttachmentMetadata,
   type AddIssueDependency,
+  type IssueDocumentFormat,
+  type UpsertIssueDocument,
 } from "./issue.js";
 
 export {

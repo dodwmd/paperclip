@@ -112,3 +112,25 @@ export const addIssueDependencySchema = z.object({
 });
 
 export type AddIssueDependency = z.infer<typeof addIssueDependencySchema>;
+
+export const ISSUE_DOCUMENT_FORMATS = ["markdown"] as const;
+
+export const issueDocumentFormatSchema = z.enum(ISSUE_DOCUMENT_FORMATS);
+
+export const issueDocumentKeySchema = z
+  .string()
+  .trim()
+  .min(1)
+  .max(64)
+  .regex(/^[a-z0-9][a-z0-9_-]*$/, "Document key must be lowercase letters, numbers, _ or -");
+
+export const upsertIssueDocumentSchema = z.object({
+  title: z.string().trim().max(200).nullable().optional(),
+  format: issueDocumentFormatSchema,
+  body: z.string().max(524288),
+  changeSummary: z.string().trim().max(500).nullable().optional(),
+  baseRevisionId: z.string().uuid().nullable().optional(),
+});
+
+export type IssueDocumentFormat = z.infer<typeof issueDocumentFormatSchema>;
+export type UpsertIssueDocument = z.infer<typeof upsertIssueDocumentSchema>;
