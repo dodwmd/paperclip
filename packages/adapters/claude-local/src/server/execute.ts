@@ -435,7 +435,11 @@ export async function execute(ctx: AdapterExecutionContext): Promise<AdapterExec
   };
 
   const buildClaudeArgs = (resumeSessionId: string | null) => {
-    const args = ["--print", "-", "--output-format", "stream-json", "--verbose"];
+    // Extra args go first so they act as subcommands (e.g. `ollama launch claude`)
+    // before the Claude CLI flags.
+    const args: string[] = [];
+    if (extraArgs.length > 0) args.push(...extraArgs);
+    args.push("--print", "-", "--output-format", "stream-json", "--verbose");
     if (resumeSessionId) args.push("--resume", resumeSessionId);
     if (dangerouslySkipPermissions) args.push("--dangerously-skip-permissions");
     if (chrome) args.push("--chrome");
@@ -446,7 +450,6 @@ export async function execute(ctx: AdapterExecutionContext): Promise<AdapterExec
       args.push("--append-system-prompt-file", effectiveInstructionsFilePath);
     }
     args.push("--add-dir", skillsDir);
-    if (extraArgs.length > 0) args.push(...extraArgs);
     return args;
   };
 
