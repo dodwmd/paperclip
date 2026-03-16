@@ -232,6 +232,21 @@ async function runGit(args: string[], cwd: string): Promise<string> {
   return proc.stdout.trim();
 }
 
+/** Inject GITHUB_TOKEN into HTTPS GitHub URLs for authenticated clones. */
+function injectGitHubToken(repoUrl: string): string {
+  const token = process.env.GITHUB_TOKEN;
+  if (!token) return repoUrl;
+  try {
+    const url = new URL(repoUrl);
+    if (url.hostname === "github.com" && url.protocol === "https:") {
+      url.username = "x-access-token";
+      url.password = token;
+      return url.toString();
+    }
+  } catch { /* not a valid URL, return as-is */ }
+  return repoUrl;
+}
+
 async function directoryExists(value: string) {
   return fs.stat(value).then((stats) => stats.isDirectory()).catch(() => false);
 }
@@ -363,7 +378,8 @@ async function findOrCloneRepo(
   const repoName = path.basename(repoUrl.replace(/\.git$/, "")) || "repo";
   const cloneTarget = path.join(baseCwd, repoName);
   await fs.mkdir(baseCwd, { recursive: true });
-  await runGit(["clone", repoUrl, cloneTarget], baseCwd);
+  const cloneUrl = injectGitHubToken(repoUrl);
+  await runGit(["clone", cloneUrl, cloneTarget], baseCwd);
   if (repoRef) {
     await runGit(["checkout", repoRef], cloneTarget);
   }
