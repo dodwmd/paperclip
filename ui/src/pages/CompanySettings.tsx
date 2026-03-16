@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { ChangeEvent, useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useCompany } from "../context/CompanyContext";
 import { useBreadcrumbs } from "../context/BreadcrumbContext";
@@ -6,6 +6,7 @@ import { useToast } from "../context/ToastContext";
 import { companiesApi } from "../api/companies";
 import { accessApi } from "../api/access";
 import { secretsApi } from "../api/secrets";
+import { assetsApi } from "../api/assets";
 import { queryKeys } from "../lib/queryKeys";
 import { Button } from "@/components/ui/button";
 import { Settings, Check, Eye, EyeOff, RotateCcw, Trash2, Plus, KeyRound, Loader2, X } from "lucide-react";
@@ -39,6 +40,8 @@ export function CompanySettings() {
   const [companyName, setCompanyName] = useState("");
   const [description, setDescription] = useState("");
   const [brandColor, setBrandColor] = useState("");
+  const [logoUrl, setLogoUrl] = useState("");
+  const [logoUploadError, setLogoUploadError] = useState<string | null>(null);
 
   // Sync local state from selected company
   useEffect(() => {
@@ -46,6 +49,7 @@ export function CompanySettings() {
     setCompanyName(selectedCompany.name);
     setDescription(selectedCompany.description ?? "");
     setBrandColor(selectedCompany.brandColor ?? "");
+    setLogoUrl(selectedCompany.logoUrl ?? "");
   }, [selectedCompany]);
 
   const [inviteError, setInviteError] = useState<string | null>(null);
@@ -132,6 +136,42 @@ export function CompanySettings() {
       );
     }
   });
+
+  const syncLogoState = (nextLogoUrl: string | null) => {
+    setLogoUrl(nextLogoUrl ?? "");
+    void queryClient.invalidateQueries({ queryKey: queryKeys.companies.all });
+  };
+
+  const logoUploadMutation = useMutation({
+    mutationFn: (file: File) =>
+      assetsApi
+        .uploadCompanyLogo(selectedCompanyId!, file)
+        .then((asset) => companiesApi.update(selectedCompanyId!, { logoAssetId: asset.assetId })),
+    onSuccess: (company) => {
+      syncLogoState(company.logoUrl);
+      setLogoUploadError(null);
+    }
+  });
+
+  const clearLogoMutation = useMutation({
+    mutationFn: () => companiesApi.update(selectedCompanyId!, { logoAssetId: null }),
+    onSuccess: (company) => {
+      setLogoUploadError(null);
+      syncLogoState(company.logoUrl);
+    }
+  });
+
+  function handleLogoFileChange(event: ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0] ?? null;
+    event.currentTarget.value = "";
+    if (!file) return;
+    setLogoUploadError(null);
+    logoUploadMutation.mutate(file);
+  }
+
+  function handleClearLogo() {
+    clearLogoMutation.mutate();
+  }
 
   useEffect(() => {
     setInviteError(null);
@@ -229,11 +269,53 @@ export function CompanySettings() {
             <div className="shrink-0">
               <CompanyPatternIcon
                 companyName={companyName || selectedCompany.name}
+                logoUrl={logoUrl || null}
                 brandColor={brandColor || null}
                 className="rounded-[14px]"
               />
             </div>
-            <div className="flex-1 space-y-2">
+            <div className="flex-1 space-y-3">
+              <Field
+                label="Logo"
+                hint="Upload a PNG, JPEG, WEBP, GIF, or SVG logo image."
+              >
+                <div className="space-y-2">
+                  <input
+                    type="file"
+                    accept="image/png,image/jpeg,image/webp,image/gif,image/svg+xml"
+                    onChange={handleLogoFileChange}
+                    className="w-full rounded-md border border-border bg-transparent px-2.5 py-1.5 text-sm outline-none file:mr-4 file:rounded-md file:border-0 file:bg-muted file:px-2.5 file:py-1 file:text-xs"
+                  />
+                  {logoUrl && (
+                    <div className="flex items-center gap-2">
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={handleClearLogo}
+                        disabled={clearLogoMutation.isPending}
+                      >
+                        {clearLogoMutation.isPending ? "Removing..." : "Remove logo"}
+                      </Button>
+                    </div>
+                  )}
+                  {(logoUploadMutation.isError || logoUploadError) && (
+                    <span className="text-xs text-destructive">
+                      {logoUploadError ??
+                        (logoUploadMutation.error instanceof Error
+                          ? logoUploadMutation.error.message
+                          : "Logo upload failed")}
+                    </span>
+                  )}
+                  {clearLogoMutation.isError && (
+                    <span className="text-xs text-destructive">
+                      {clearLogoMutation.error.message}
+                    </span>
+                  )}
+                  {logoUploadMutation.isPending && (
+                    <span className="text-xs text-muted-foreground">Uploading logo...</span>
+                  )}
+                </div>
+              </Field>
               <Field
                 label="Brand color"
                 hint="Sets the hue for the company icon. Leave empty for auto-generated color."
@@ -290,8 +372,8 @@ export function CompanySettings() {
           {generalMutation.isError && (
             <span className="text-xs text-destructive">
               {generalMutation.error instanceof Error
-                ? generalMutation.error.message
-                : "Failed to save"}
+                  ? generalMutation.error.message
+                  : "Failed to save"}
             </span>
           )}
         </div>

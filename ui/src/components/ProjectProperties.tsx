@@ -13,7 +13,7 @@ import { Separator } from "@/components/ui/separator";
 import { Button } from "@/components/ui/button";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
-import { AlertCircle, Check, ExternalLink, Github, GitBranch, Loader2, Plus, Trash2, X } from "lucide-react";
+import { AlertCircle, Archive, ArchiveRestore, Check, ExternalLink, Github, GitBranch, Loader2, Plus, Trash2, X } from "lucide-react";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { ChoosePathButton } from "./PathInstructionsModal";
@@ -38,6 +38,8 @@ interface ProjectPropertiesProps {
   getFieldSaveState?: (field: ProjectConfigFieldKey) => ProjectFieldSaveState;
   onDelete?: () => void;
   isDeleting?: boolean;
+  onArchive?: (archived: boolean) => void;
+  archivePending?: boolean;
 }
 
 export type ProjectFieldSaveState = "idle" | "saving" | "saved" | "error";
@@ -156,7 +158,7 @@ function ProjectStatusPicker({ status, onChange }: { status: string; onChange: (
   );
 }
 
-export function ProjectProperties({ project, onUpdate, onFieldUpdate, getFieldSaveState, onDelete, isDeleting }: ProjectPropertiesProps) {
+export function ProjectProperties({ project, onUpdate, onFieldUpdate, getFieldSaveState, onDelete, isDeleting, onArchive, archivePending }: ProjectPropertiesProps) {
   const { selectedCompanyId } = useCompany();
   const queryClient = useQueryClient();
   const [goalOpen, setGoalOpen] = useState(false);
@@ -1032,6 +1034,45 @@ export function ProjectProperties({ project, onUpdate, onFieldUpdate, getFieldSa
         )}
 
       </div>
+
+      {onArchive && (
+        <>
+          <Separator className="my-4" />
+          <div className="space-y-4 py-4">
+            <div className="text-xs font-medium text-destructive uppercase tracking-wide">
+              Danger Zone
+            </div>
+            <div className="space-y-3 rounded-md border border-destructive/40 bg-destructive/5 px-4 py-4">
+              <p className="text-sm text-muted-foreground">
+                {project.archivedAt
+                  ? "Unarchive this project to restore it in the sidebar and project selectors."
+                  : "Archive this project to hide it from the sidebar and project selectors."}
+              </p>
+              <Button
+                size="sm"
+                variant="destructive"
+                disabled={archivePending}
+                onClick={() => {
+                  const action = project.archivedAt ? "Unarchive" : "Archive";
+                  const confirmed = window.confirm(
+                    `${action} project "${project.name}"?`,
+                  );
+                  if (!confirmed) return;
+                  onArchive(!project.archivedAt);
+                }}
+              >
+                {archivePending ? (
+                  <><Loader2 className="h-3 w-3 animate-spin mr-1" />{project.archivedAt ? "Unarchiving..." : "Archiving..."}</>
+                ) : project.archivedAt ? (
+                  <><ArchiveRestore className="h-3 w-3 mr-1" />Unarchive project</>
+                ) : (
+                  <><Archive className="h-3 w-3 mr-1" />Archive project</>
+                )}
+              </Button>
+            </div>
+          </div>
+        </>
+      )}
     </div>
   );
 }

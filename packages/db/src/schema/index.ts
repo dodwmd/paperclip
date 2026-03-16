@@ -1,4 +1,5 @@
 export { companies } from "./companies.js";
+export { companyLogos } from "./company_logos.js";
 export { authUsers, authSessions, authAccounts, authVerifications } from "./auth.js";
 export { instanceUserRoles } from "./instance_user_roles.js";
 export { agents } from "./agents.js";
@@ -37,3 +38,11 @@ export { activityLog } from "./activity_log.js";
 export { companySecrets } from "./company_secrets.js";
 export { companySecretVersions } from "./company_secret_versions.js";
 export { instanceMcpCatalog } from "./instance_mcp_catalog.js";
+export { plugins } from "./plugins.js";
+export { pluginConfig } from "./plugin_config.js";
+export { pluginCompanySettings } from "./plugin_company_settings.js";
+export { pluginState } from "./plugin_state.js";
+export { pluginEntities } from "./plugin_entities.js";
+export { pluginJobs, pluginJobRuns } from "./plugin_jobs.js";
+export { pluginWebhookDeliveries } from "./plugin_webhooks.js";
+export { pluginLogs } from "./plugin_logs.js";

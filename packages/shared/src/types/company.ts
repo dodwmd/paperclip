@@ -17,6 +17,8 @@ export interface Company {
   kanbanLastSyncedAt: Date | null;
   kanbanLastSyncError: string | null;
   kanbanGitSha: string | null;
+  logoAssetId: string | null;
+  logoUrl: string | null;
   createdAt: Date;
   updatedAt: Date;
 }

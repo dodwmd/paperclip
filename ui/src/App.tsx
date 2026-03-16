@@ -26,6 +26,9 @@ import { DesignGuide } from "./pages/DesignGuide";
 import { InstanceSettings } from "./pages/InstanceSettings";
 import { InstanceMcps } from "./pages/InstanceMcps";
 import { InstanceDatabase } from "./pages/InstanceDatabase";
+import { PluginManager } from "./pages/PluginManager";
+import { PluginSettings } from "./pages/PluginSettings";
+import { PluginPage } from "./pages/PluginPage";
 import { RunTranscriptUxLab } from "./pages/RunTranscriptUxLab";
 import { OrgChart } from "./pages/OrgChart";
 import { WorkflowDiagram } from "./pages/WorkflowDiagram";
@@ -116,6 +119,7 @@ function boardRoutes() {
       <Route path="company/settings" element={<CompanySettings />} />
       <Route path="settings" element={<LegacySettingsRedirect />} />
       <Route path="settings/*" element={<LegacySettingsRedirect />} />
+      <Route path="plugins/:pluginId" element={<PluginPage />} />
       <Route path="org" element={<OrgChart />} />
       <Route path="workflow" element={<WorkflowDiagram />} />
       <Route path="agents" element={<Navigate to="/agents/all" replace />} />
@@ -155,6 +159,7 @@ function boardRoutes() {
       <Route path="inbox/new" element={<Navigate to="/inbox/recent" replace />} />
       <Route path="design-guide" element={<DesignGuide />} />
       <Route path="tests/ux/runs" element={<RunTranscriptUxLab />} />
+      <Route path=":pluginRoutePath" element={<PluginPage />} />
       <Route path="*" element={<NotFoundPage scope="board" />} />
     </>
   );
@@ -166,7 +171,7 @@ function InboxRootRedirect() {
 
 function LegacySettingsRedirect() {
   const location = useLocation();
-  return <Navigate to={`/instance/settings${location.search}${location.hash}`} replace />;
+  return <Navigate to={`/instance/settings/heartbeats${location.search}${location.hash}`} replace />;
 }
 
 function OnboardingRoutePage() {
@@ -299,9 +304,12 @@ export function App() {
         <Route element={<CloudAccessGate />}>
           <Route index element={<CompanyRootRedirect />} />
           <Route path="onboarding" element={<OnboardingRoutePage />} />
-          <Route path="instance" element={<Navigate to="/instance/settings" replace />} />
+          <Route path="instance" element={<Navigate to="/instance/settings/heartbeats" replace />} />
           <Route path="instance/settings" element={<Layout />}>
-            <Route index element={<InstanceSettings />} />
+            <Route index element={<Navigate to="heartbeats" replace />} />
+            <Route path="heartbeats" element={<InstanceSettings />} />
+            <Route path="plugins" element={<PluginManager />} />
+            <Route path="plugins/:pluginId" element={<PluginSettings />} />
           </Route>
           <Route path="instance/mcps" element={<Layout />}>
             <Route index element={<InstanceMcps />} />

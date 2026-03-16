@@ -19,6 +19,8 @@ function makeCompany(overrides: Partial<Company>): Company {
     kanbanLastSyncedAt: null,
     kanbanLastSyncError: null,
     kanbanGitSha: null,
+    logoAssetId: null,
+    logoUrl: null,
     createdAt: new Date(),
     updatedAt: new Date(),
     ...overrides,
