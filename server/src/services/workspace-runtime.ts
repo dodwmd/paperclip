@@ -232,9 +232,8 @@ async function runGit(args: string[], cwd: string): Promise<string> {
   return proc.stdout.trim();
 }
 
-/** Inject GITHUB_TOKEN into HTTPS GitHub URLs for authenticated clones. */
-function injectGitHubToken(repoUrl: string): string {
-  const token = process.env.GITHUB_TOKEN;
+/** Inject a token into HTTPS GitHub URLs for authenticated clones. */
+function injectGitToken(repoUrl: string, token: string | null): string {
   if (!token) return repoUrl;
   try {
     const url = new URL(repoUrl);
@@ -353,6 +352,7 @@ async function findOrCloneRepo(
   baseCwd: string,
   repoUrl: string | null,
   repoRef: string | null,
+  gitToken: string | null,
 ): Promise<string> {
   // 1. baseCwd itself is a git repo
   try {
@@ -378,7 +378,7 @@ async function findOrCloneRepo(
   const repoName = path.basename(repoUrl.replace(/\.git$/, "")) || "repo";
   const cloneTarget = path.join(baseCwd, repoName);
   await fs.mkdir(baseCwd, { recursive: true });
-  const cloneUrl = injectGitHubToken(repoUrl);
+  const cloneUrl = injectGitToken(repoUrl, gitToken);
   await runGit(["clone", cloneUrl, cloneTarget], baseCwd);
   if (repoRef) {
     await runGit(["checkout", repoRef], cloneTarget);
@@ -391,6 +391,7 @@ export async function realizeExecutionWorkspace(input: {
   config: Record<string, unknown>;
   issue: ExecutionWorkspaceIssueRef | null;
   agent: ExecutionWorkspaceAgentRef;
+  gitToken?: string | null;
 }): Promise<RealizedExecutionWorkspace> {
   const rawStrategy = parseObject(input.config.workspaceStrategy);
   const strategyType = asString(rawStrategy.type, "project_primary");
@@ -406,7 +407,7 @@ export async function realizeExecutionWorkspace(input: {
     };
   }
 
-  const repoRoot = await findOrCloneRepo(input.base.baseCwd, input.base.repoUrl, input.base.repoRef);
+  const repoRoot = await findOrCloneRepo(input.base.baseCwd, input.base.repoUrl, input.base.repoRef, input.gitToken ?? null);
   const branchTemplate = asString(rawStrategy.branchTemplate, "{{issue.identifier}}-{{slug}}");
   const renderedBranch = renderWorkspaceTemplate(branchTemplate, {
     issue: input.issue,

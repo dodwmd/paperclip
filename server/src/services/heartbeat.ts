@@ -1549,6 +1549,7 @@ export function heartbeatService(db: Db) {
           .where(and(eq(issues.id, issueId), eq(issues.companyId, agent.companyId)))
           .then((rows) => rows[0] ?? null)
       : null;
+    const gitToken = await secretsSvc.resolveSecretByName(agent.companyId, "GITHUB_TOKEN").catch(() => null);
     const executionWorkspace = await realizeExecutionWorkspace({
       base: {
         baseCwd: resolvedWorkspace.cwd,
@@ -1565,6 +1566,7 @@ export function heartbeatService(db: Db) {
         name: agent.name,
         companyId: agent.companyId,
       },
+      gitToken,
     });
     const runtimeSessionResolution = resolveRuntimeSessionParamsForWorkspace({
       agentId: agent.id,
