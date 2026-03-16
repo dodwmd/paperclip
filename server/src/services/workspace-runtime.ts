@@ -330,6 +330,46 @@ async function provisionExecutionWorktree(input: {
   });
 }
 
+/**
+ * Locate a git repo at `baseCwd` or inside a subdirectory of it.
+ * If none is found and `repoUrl` is provided, clone into a subdirectory.
+ */
+async function findOrCloneRepo(
+  baseCwd: string,
+  repoUrl: string | null,
+  repoRef: string | null,
+): Promise<string> {
+  // 1. baseCwd itself is a git repo
+  try {
+    return await runGit(["rev-parse", "--show-toplevel"], baseCwd);
+  } catch { /* not a repo, keep looking */ }
+
+  // 2. Check immediate subdirectories for an existing clone
+  const entries = await fs.readdir(baseCwd, { withFileTypes: true }).catch(() => []);
+  for (const entry of entries) {
+    if (!entry.isDirectory()) continue;
+    const subdir = path.join(baseCwd, entry.name);
+    try {
+      return await runGit(["rev-parse", "--show-toplevel"], subdir);
+    } catch { /* not a repo */ }
+  }
+
+  // 3. No repo found — clone if we have a URL
+  if (!repoUrl) {
+    throw new Error(
+      `Workspace directory "${baseCwd}" is not a git repository and no repoUrl is configured to clone from.`,
+    );
+  }
+  const repoName = path.basename(repoUrl.replace(/\.git$/, "")) || "repo";
+  const cloneTarget = path.join(baseCwd, repoName);
+  await fs.mkdir(baseCwd, { recursive: true });
+  await runGit(["clone", repoUrl, cloneTarget], baseCwd);
+  if (repoRef) {
+    await runGit(["checkout", repoRef], cloneTarget);
+  }
+  return runGit(["rev-parse", "--show-toplevel"], cloneTarget);
+}
+
 export async function realizeExecutionWorkspace(input: {
   base: ExecutionWorkspaceInput;
   config: Record<string, unknown>;
@@ -350,23 +390,7 @@ export async function realizeExecutionWorkspace(input: {
     };
   }
 
-  let repoRoot: string;
-  try {
-    repoRoot = await runGit(["rev-parse", "--show-toplevel"], input.base.baseCwd);
-  } catch {
-    if (!input.base.repoUrl) {
-      throw new Error(
-        `Workspace directory "${input.base.baseCwd}" is not a git repository and no repoUrl is configured to clone from.`,
-      );
-    }
-    const parentDir = path.dirname(input.base.baseCwd);
-    await fs.mkdir(parentDir, { recursive: true });
-    await runGit(["clone", input.base.repoUrl, input.base.baseCwd], parentDir);
-    if (input.base.repoRef) {
-      await runGit(["checkout", input.base.repoRef], input.base.baseCwd);
-    }
-    repoRoot = await runGit(["rev-parse", "--show-toplevel"], input.base.baseCwd);
-  }
+  const repoRoot = await findOrCloneRepo(input.base.baseCwd, input.base.repoUrl, input.base.repoRef);
   const branchTemplate = asString(rawStrategy.branchTemplate, "{{issue.identifier}}-{{slug}}");
   const renderedBranch = renderWorkspaceTemplate(branchTemplate, {
     issue: input.issue,
