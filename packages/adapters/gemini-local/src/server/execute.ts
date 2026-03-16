@@ -256,7 +256,6 @@ export async function execute(ctx: AdapterExecutionContext): Promise<AdapterExec
   await ensureAbsoluteDirectory(cwd, { createIfMissing: true });
 
   const envConfig = parseObject(config.env);
-  const agentHome = asString(envConfig.HOME, os.homedir());
   await ensureGeminiSettingsFile(onLog, agentHome, effectiveModel);
   await ensureGeminiSkillsInjected(onLog, agentHome);
   const hasExplicitApiKey =
