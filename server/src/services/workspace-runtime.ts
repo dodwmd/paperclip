@@ -350,7 +350,23 @@ export async function realizeExecutionWorkspace(input: {
     };
   }
 
-  const repoRoot = await runGit(["rev-parse", "--show-toplevel"], input.base.baseCwd);
+  let repoRoot: string;
+  try {
+    repoRoot = await runGit(["rev-parse", "--show-toplevel"], input.base.baseCwd);
+  } catch {
+    if (!input.base.repoUrl) {
+      throw new Error(
+        `Workspace directory "${input.base.baseCwd}" is not a git repository and no repoUrl is configured to clone from.`,
+      );
+    }
+    const parentDir = path.dirname(input.base.baseCwd);
+    await fs.mkdir(parentDir, { recursive: true });
+    await runGit(["clone", input.base.repoUrl, input.base.baseCwd], parentDir);
+    if (input.base.repoRef) {
+      await runGit(["checkout", input.base.repoRef], input.base.baseCwd);
+    }
+    repoRoot = await runGit(["rev-parse", "--show-toplevel"], input.base.baseCwd);
+  }
   const branchTemplate = asString(rawStrategy.branchTemplate, "{{issue.identifier}}-{{slug}}");
   const renderedBranch = renderWorkspaceTemplate(branchTemplate, {
     issue: input.issue,
