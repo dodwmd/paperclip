@@ -10,7 +10,16 @@ import {
 } from "@paperclipai/shared";
 import { forbidden } from "../errors.js";
 import { validate } from "../middleware/validate.js";
-import { accessService, agentService, companyPortabilityService, companyService, logActivity, syncKanbanConfig, checkKanbanRemoteSha } from "../services/index.js";
+import {
+  accessService,
+  agentService,
+  budgetService,
+  companyPortabilityService,
+  companyService,
+  logActivity,
+  syncKanbanConfig,
+  checkKanbanRemoteSha,
+} from "../services/index.js";
 import { assertBoard, assertCompanyAccess, getActorInfo } from "./authz.js";
 import { logger } from "../middleware/logger.js";
 
@@ -20,6 +29,7 @@ export function companyRoutes(db: Db) {
   const portability = companyPortabilityService(db);
   const access = accessService(db);
   const agents = agentService(db);
+  const budgets = budgetService(db);
 
   async function assertBoardOrCeoAgent(req: Request, companyId: string) {
     if (req.actor.type === "board") return;
@@ -134,6 +144,18 @@ export function companyRoutes(db: Db) {
       entityId: company.id,
       details: { name: company.name },
     });
+    if (company.budgetMonthlyCents > 0) {
+      await budgets.upsertPolicy(
+        company.id,
+        {
+          scopeType: "company",
+          scopeId: company.id,
+          amount: company.budgetMonthlyCents,
+          windowKind: "calendar_month_utc",
+        },
+        req.actor.userId ?? "board",
+      );
+    }
     res.status(201).json(company);
   });
 

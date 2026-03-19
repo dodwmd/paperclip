@@ -161,4 +161,12 @@ export const agentsApi = {
     api.get<{ remoteSha: string | null; localSha: string | null; inSync: boolean; permissionError: boolean }>(
       agentPath(id, companyId, "/persona-status"),
     ),
+  availableSkills: () =>
+    api.get<{ skills: AvailableSkill[] }>("/skills/available"),
 };
+
+export interface AvailableSkill {
+  name: string;
+  description: string;
+  isPaperclipManaged: boolean;
+}

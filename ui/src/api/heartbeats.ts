@@ -4,6 +4,7 @@ import type {
   InstanceSchedulerHeartbeatAgent,
   InstanceMcpServersData,
   InstanceMcpCatalogEntry,
+  WorkspaceOperation,
 } from "@paperclipai/shared";
 import { api } from "./client";
 
@@ -43,6 +44,12 @@ export const heartbeatsApi = {
   log: (runId: string, offset = 0, limitBytes = 256000) =>
     api.get<{ runId: string; store: string; logRef: string; content: string; nextOffset?: number }>(
       `/heartbeat-runs/${runId}/log?offset=${encodeURIComponent(String(offset))}&limitBytes=${encodeURIComponent(String(limitBytes))}`,
+    ),
+  workspaceOperations: (runId: string) =>
+    api.get<WorkspaceOperation[]>(`/heartbeat-runs/${runId}/workspace-operations`),
+  workspaceOperationLog: (operationId: string, offset = 0, limitBytes = 256000) =>
+    api.get<{ operationId: string; store: string; logRef: string; content: string; nextOffset?: number }>(
+      `/workspace-operations/${operationId}/log?offset=${encodeURIComponent(String(offset))}&limitBytes=${encodeURIComponent(String(limitBytes))}`,
     ),
   cancel: (runId: string) => api.post<void>(`/heartbeat-runs/${runId}/cancel`, {}),
   acknowledge: (runId: string) => api.post<void>(`/heartbeat-runs/${runId}/acknowledge`, {}),

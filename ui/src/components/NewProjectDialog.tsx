@@ -41,7 +41,6 @@ const projectStatuses = [
 ];
 
 type WorkspaceSetup = "none" | "local" | "repo" | "both";
-const REPO_ONLY_CWD_SENTINEL = "/__paperclip_repo_only__";
 
 export function NewProjectDialog() {
   const { newProjectOpen, closeNewProject } = useDialog();
@@ -170,7 +169,6 @@ export function NewProjectDialog() {
       } else if (repoRequired) {
         workspacePayloads.push({
           name: deriveWorkspaceNameFromRepo(repoUrl),
-          cwd: REPO_ONLY_CWD_SENTINEL,
           repoUrl,
         });
       }
@@ -281,7 +279,7 @@ export function NewProjectDialog() {
         <div className="px-4 pb-3 space-y-3 border-t border-border">
           <div className="pt-3">
             <p className="text-sm font-medium">Where will work be done on this project?</p>
-            <p className="text-xs text-muted-foreground">Add local folder and/or git repo workspace hints.</p>
+            <p className="text-xs text-muted-foreground">Add a repo and/or local folder for this project.</p>
           </div>
           <div className="grid gap-2 sm:grid-cols-3">
             <button
@@ -324,7 +322,7 @@ export function NewProjectDialog() {
                 <GitBranch className="h-4 w-4" />
                 Both
               </div>
-              <p className="mt-1 text-xs text-muted-foreground">Configure local + repo hints.</p>
+              <p className="mt-1 text-xs text-muted-foreground">Configure both repo and local folder.</p>
             </button>
           </div>
 
@@ -344,7 +342,7 @@ export function NewProjectDialog() {
           )}
           {(workspaceSetup === "repo" || workspaceSetup === "both") && (
             <div className="rounded-md border border-border p-2">
-              <label className="mb-1 block text-xs text-muted-foreground">Git repo URL</label>
+              <label className="mb-1 block text-xs text-muted-foreground">Repo URL</label>
               <input
                 className="w-full rounded border border-border bg-transparent px-2 py-1 text-xs outline-none"
                 value={workspaceRepoUrl}

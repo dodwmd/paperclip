@@ -1,4 +1,4 @@
-import type { CompanyStatus } from "../constants.js";
+import type { CompanyStatus, PauseReason } from "../constants.js";
 import type { KanbanConfig } from "../kanban-policy.js";
 
 export interface Company {
@@ -6,6 +6,8 @@ export interface Company {
   name: string;
   description: string | null;
   status: CompanyStatus;
+  pauseReason: PauseReason | null;
+  pausedAt: Date | null;
   issuePrefix: string;
   issueCounter: number;
   budgetMonthlyCents: number;

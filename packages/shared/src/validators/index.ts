@@ -1,4 +1,18 @@
 export {
+  instanceExperimentalSettingsSchema,
+  patchInstanceExperimentalSettingsSchema,
+  type InstanceExperimentalSettings,
+  type PatchInstanceExperimentalSettings,
+} from "./instance.js";
+
+export {
+  upsertBudgetPolicySchema,
+  resolveBudgetIncidentSchema,
+  type UpsertBudgetPolicy,
+  type ResolveBudgetIncident,
+} from "./budget.js";
+
+export {
   createCompanySchema,
   updateCompanySchema,
   type CreateCompany,
@@ -92,6 +106,22 @@ export {
 } from "./issue.js";
 
 export {
+  createIssueWorkProductSchema,
+  updateIssueWorkProductSchema,
+  issueWorkProductTypeSchema,
+  issueWorkProductStatusSchema,
+  issueWorkProductReviewStateSchema,
+  type CreateIssueWorkProduct,
+  type UpdateIssueWorkProduct,
+} from "./work-product.js";
+
+export {
+  updateExecutionWorkspaceSchema,
+  executionWorkspaceStatusSchema,
+  type UpdateExecutionWorkspace,
+} from "./execution-workspace.js";
+
+export {
   createGoalSchema,
   updateGoalSchema,
   type CreateGoal,
@@ -130,6 +160,11 @@ export {
   type CreateCostEvent,
   type UpdateBudget,
 } from "./cost.js";
+
+export {
+  createFinanceEventSchema,
+  type CreateFinanceEvent,
+} from "./finance.js";
 
 export {
   createAssetImageMetadataSchema,
