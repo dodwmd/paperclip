@@ -28,15 +28,6 @@ export interface CostSummary {
   utilizationPercent: number;
 }
 
-export interface CostByProject {
-  projectId: string | null;
-  projectName: string | null;
-  costCents: number;
-  inputTokens: number;
-  outputTokens: number;
-  cachedInputTokens: number;
-}
-
 export interface CostByAgent {
   agentId: string;
   agentName: string | null;
@@ -45,7 +36,6 @@ export interface CostByAgent {
   inputTokens: number;
   cachedInputTokens: number;
   outputTokens: number;
-  cachedInputTokens: number;
   apiRunCount: number;
   subscriptionRunCount: number;
   subscriptionCachedInputTokens: number;

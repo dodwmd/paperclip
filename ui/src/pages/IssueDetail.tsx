@@ -11,7 +11,6 @@ import { useCompany } from "../context/CompanyContext";
 import { usePanel } from "../context/PanelContext";
 import { useToast } from "../context/ToastContext";
 import { useBreadcrumbs } from "../context/BreadcrumbContext";
-import { useToast } from "../context/ToastContext";
 import { queryKeys } from "../lib/queryKeys";
 import { readIssueDetailBreadcrumb } from "../lib/issueDetailBreadcrumb";
 import { useProjectOrder } from "../hooks/useProjectOrder";
@@ -264,7 +263,6 @@ export function IssueDetail() {
   const [addDependencyOpen, setAddDependencyOpen] = useState(false);
   const [attachmentDragActive, setAttachmentDragActive] = useState(false);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
-  const { pushToast } = useToast();
   const lastMarkedReadIssueIdRef = useRef<string | null>(null);
 
   const { data: issue, isLoading, error } = useQuery({

@@ -1,0 +1,10 @@
+{
+  "model": {
+    "name": "gemini-2.5-pro"
+  },
+  "context": {
+    "includeDirectories": [
+      ""
+    ]
+  }
+}

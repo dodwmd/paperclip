@@ -772,7 +772,7 @@ describe("POST /issues/:id/checkout — role capability check", () => {
     expect(res.status).toBe(200);
   });
 
-  it("general-role agent cannot checkout → 422 forbidden_role", async () => {
+  it("general-role agent can checkout (general is a checkout-capable role)", async () => {
     mockIssueSvc.getById.mockResolvedValue({ ...baseIssue, status: "ready" });
     mockAgentSvc.getById.mockResolvedValue({ ...baseAgent, role: "general" });
 
@@ -782,7 +782,6 @@ describe("POST /issues/:id/checkout — role capability check", () => {
       .set("X-Paperclip-Run-Id", "run-1")
       .send({ agentId: AGENT_UUID, expectedStatuses: ["ready"] });
 
-    expect(res.status).toBe(422);
-    expect(res.body.details?.code).toBe("forbidden_role");
+    expect(res.status).toBe(200);
   });
 });

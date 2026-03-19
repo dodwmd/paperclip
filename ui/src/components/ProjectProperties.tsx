@@ -625,13 +625,13 @@ export function ProjectProperties({ project, onUpdate, onFieldUpdate, getFieldSa
             <div className="space-y-1">
               {workspaces.map((workspace) => (
                 <div key={workspace.id} className="space-y-1">
-                  {workspace.cwd && workspace.cwd !== REPO_ONLY_CWD_SENTINEL ? (
+                  {workspace.cwd ? (
                     <div className="flex items-center justify-between gap-2 py-1">
                       <span className="min-w-0 truncate font-mono text-xs text-muted-foreground">{workspace.cwd}</span>
                       <Button
                         variant="ghost"
                         size="icon-xs"
-                        onClick={() => clearLocalWorkspace(workspace)}
+                        onClick={() => clearLocalWorkspace()}
                         aria-label="Delete local folder"
                       >
                         <Trash2 className="h-3 w-3" />
@@ -655,7 +655,7 @@ export function ProjectProperties({ project, onUpdate, onFieldUpdate, getFieldSa
                       <Button
                         variant="ghost"
                         size="icon-xs"
-                        onClick={() => clearRepoWorkspace(workspace)}
+                        onClick={() => clearRepoWorkspace()}
                         aria-label="Delete workspace repo"
                       >
                         <Trash2 className="h-3 w-3" />
@@ -710,6 +710,7 @@ export function ProjectProperties({ project, onUpdate, onFieldUpdate, getFieldSa
                 </div>
               ))}
             </div>
+          </div>
           {workspaceMode === "local" && (
             <div className="space-y-1.5 rounded-md border border-border p-2">
               <div className="flex items-center gap-2">
@@ -1112,7 +1113,7 @@ export function ProjectProperties({ project, onUpdate, onFieldUpdate, getFieldSa
               </div>
             </div>
           </>
-        ) : null}
+        )}
 
       </div>
 
