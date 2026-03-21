@@ -185,6 +185,7 @@ async function ensureGeminiSkillsInjected(
   const selectedEntries = skillsEntries.filter((entry) => desiredSet.has(entry.key));
   if (selectedEntries.length === 0) return;
 
+  if (!agentHome) return;
   const skillsHome = geminiSkillsHome(agentHome);
   try {
     await fs.mkdir(skillsHome, { recursive: true });

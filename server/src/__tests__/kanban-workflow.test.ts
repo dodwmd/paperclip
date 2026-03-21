@@ -68,6 +68,7 @@ vi.mock("../services/index.js", async (importOriginal) => {
       getRun: vi.fn(),
       getActiveRunForAgent: vi.fn(),
       cancelRun: vi.fn(),
+      reportRunActivity: vi.fn().mockResolvedValue(undefined),
     }),
     accessService: () => ({
       canUser: vi.fn().mockResolvedValue(true),
@@ -84,6 +85,27 @@ vi.mock("../services/index.js", async (importOriginal) => {
     secretService: () => ({
       normalizeAdapterConfigForPersistence: vi.fn().mockResolvedValue({}),
       resolveSecrets: vi.fn().mockResolvedValue({}),
+    }),
+    routineService: () => ({
+      syncRunStatusForIssue: vi.fn().mockResolvedValue(undefined),
+    }),
+    executionWorkspaceService: () => ({
+      getById: vi.fn().mockResolvedValue(null),
+    }),
+    workProductService: () => ({
+      listForIssue: vi.fn().mockResolvedValue([]),
+      createForIssue: vi.fn(),
+      getById: vi.fn(),
+      update: vi.fn(),
+      remove: vi.fn(),
+    }),
+    documentService: () => ({
+      getIssueDocumentPayload: vi.fn().mockResolvedValue(null),
+      listIssueDocuments: vi.fn().mockResolvedValue([]),
+      getIssueDocumentByKey: vi.fn(),
+      upsertIssueDocument: vi.fn(),
+      listIssueDocumentRevisions: vi.fn().mockResolvedValue([]),
+      deleteIssueDocument: vi.fn(),
     }),
     logActivity: mockLogActivity,
     DEFAULT_TRANSITION_RULES: actual.DEFAULT_TRANSITION_RULES,
