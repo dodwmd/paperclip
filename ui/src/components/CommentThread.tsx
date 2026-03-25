@@ -311,12 +311,15 @@ export function CommentThread({
     return Array.from(agentMap.values())
       .filter((a) => a.status !== "terminated")
       .map((a) => ({
-        id: a.id,
+        id: `agent:${a.id}`,
         name: a.name,
         // Use the agent's role as the @-handle so the backend regex can resolve it.
         // Agent names often contain spaces (e.g. "Product Owner") which the regex
         // /\B@([^\s@,!?.]+)/g cannot capture past the first space.
         mention: a.role ?? undefined,
+        kind: "agent",
+        agentId: a.id,
+        agentIcon: a.icon,
       }));
   }, [agentMap, providedMentions]);
 
@@ -381,10 +384,17 @@ export function CommentThread({
 
   async function handleAttachFile(evt: ChangeEvent<HTMLInputElement>) {
     const file = evt.target.files?.[0];
-    if (!file || !onAttachImage) return;
+    if (!file) return;
     setAttaching(true);
     try {
-      await onAttachImage(file);
+      if (imageUploadHandler) {
+        const url = await imageUploadHandler(file);
+        const safeName = file.name.replace(/[[\]]/g, "\\$&");
+        const markdown = `![${safeName}](${url})`;
+        setBody((prev) => prev ? `${prev}\n\n${markdown}` : markdown);
+      } else if (onAttachImage) {
+        await onAttachImage(file);
+      }
     } finally {
       setAttaching(false);
       if (attachInputRef.current) attachInputRef.current.value = "";
@@ -419,7 +429,7 @@ export function CommentThread({
           contentClassName="min-h-[60px] text-sm"
         />
         <div className="flex items-center justify-end gap-3">
-          {onAttachImage && (
+          {(imageUploadHandler || onAttachImage) && (
             <div className="mr-auto flex items-center gap-3">
               <input
                 ref={attachInputRef}
