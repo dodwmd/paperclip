@@ -8,6 +8,7 @@ const mockIssueService = vi.hoisted(() => ({
   getById: vi.fn(),
   getAncestors: vi.fn(),
   findMentionedProjectIds: vi.fn(),
+  getDependencies: vi.fn(async () => ({ blockedBy: [], blocks: [] })),
   getCommentCursor: vi.fn(),
   getComment: vi.fn(),
 }));
@@ -50,6 +51,9 @@ vi.mock("../services/index.js", () => ({
   }),
   workProductService: () => ({
     listForIssue: vi.fn(async () => []),
+  }),
+  companyService: () => ({
+    getById: vi.fn(async () => ({ id: "company-1", kanbanConfig: null })),
   }),
 }));
 
@@ -157,7 +161,6 @@ describe("issue goal context routes", () => {
 
   it("surfaces the project goal from GET /issues/:id when the issue has no direct goal", async () => {
     const res = await request(createApp()).get("/api/issues/11111111-1111-4111-8111-111111111111");
-
     expect(res.status).toBe(200);
     expect(res.body.goalId).toBe(projectGoal.id);
     expect(res.body.goal).toEqual(
