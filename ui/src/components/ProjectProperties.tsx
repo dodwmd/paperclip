@@ -14,9 +14,7 @@ import { Separator } from "@/components/ui/separator";
 import { Button } from "@/components/ui/button";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
-import { AlertCircle, Archive, ArchiveRestore, Check, ExternalLink, Github, GitBranch, Loader2, Plus, Trash2, X } from "lucide-react";
-import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { Input } from "@/components/ui/input";
+import { AlertCircle, Archive, ArchiveRestore, Check, ExternalLink, Github, Loader2, Plus, Trash2, X } from "lucide-react";
 import { ChoosePathButton } from "./PathInstructionsModal";
 import { DraftInput } from "./agent-config-primitives";
 import { InlineEditor } from "./InlineEditor";
@@ -29,17 +27,11 @@ const PROJECT_STATUSES = [
   { value: "cancelled", label: "Cancelled" },
 ];
 
-// TODO(issue-worktree-support): re-enable this UI once the workflow is ready to ship.
-const SHOW_EXPERIMENTAL_ISSUE_WORKTREE_UI = true;
-
-
 interface ProjectPropertiesProps {
   project: Project;
   onUpdate?: (data: Record<string, unknown>) => void;
   onFieldUpdate?: (field: ProjectConfigFieldKey, data: Record<string, unknown>) => void;
   getFieldSaveState?: (field: ProjectConfigFieldKey) => ProjectFieldSaveState;
-  onDelete?: () => void;
-  isDeleting?: boolean;
   onArchive?: (archived: boolean) => void;
   archivePending?: boolean;
 }
@@ -223,7 +215,7 @@ function ArchiveDangerZone({
   );
 }
 
-export function ProjectProperties({ project, onUpdate, onFieldUpdate, getFieldSaveState, onDelete, isDeleting, onArchive, archivePending }: ProjectPropertiesProps) {
+export function ProjectProperties({ project, onUpdate, onFieldUpdate, getFieldSaveState, onArchive, archivePending }: ProjectPropertiesProps) {
   const { selectedCompanyId } = useCompany();
   const queryClient = useQueryClient();
   const [goalOpen, setGoalOpen] = useState(false);
@@ -232,8 +224,6 @@ export function ProjectProperties({ project, onUpdate, onFieldUpdate, getFieldSa
   const [workspaceCwd, setWorkspaceCwd] = useState("");
   const [workspaceRepoUrl, setWorkspaceRepoUrl] = useState("");
   const [workspaceError, setWorkspaceError] = useState<string | null>(null);
-  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
-  const [deleteConfirmText, setDeleteConfirmText] = useState("");
 
   const commitField = (field: ProjectConfigFieldKey, data: Record<string, unknown>) => {
     if (onFieldUpdate) {
@@ -252,6 +242,7 @@ export function ProjectProperties({ project, onUpdate, onFieldUpdate, getFieldSa
   const { data: experimentalSettings } = useQuery({
     queryKey: queryKeys.instance.experimentalSettings,
     queryFn: () => instanceSettingsApi.getExperimental(),
+    retry: false,
   });
 
   const linkedGoalIds = project.goalIds.length > 0
@@ -285,8 +276,10 @@ export function ProjectProperties({ project, onUpdate, onFieldUpdate, getFieldSa
   };
 
   const invalidateProject = () => {
-    // Use prefix match so both UUID and URL-key based query keys are invalidated
-    queryClient.invalidateQueries({ queryKey: ["projects", "detail"] });
+    queryClient.invalidateQueries({ queryKey: queryKeys.projects.detail(project.id) });
+    if (project.urlKey !== project.id) {
+      queryClient.invalidateQueries({ queryKey: queryKeys.projects.detail(project.urlKey) });
+    }
     if (selectedCompanyId) {
       queryClient.invalidateQueries({ queryKey: queryKeys.projects.list(selectedCompanyId) });
     }
@@ -351,9 +344,10 @@ export function ProjectProperties({ project, onUpdate, onFieldUpdate, getFieldSa
 
   const isAbsolutePath = (value: string) => value.startsWith("/") || /^[A-Za-z]:[\\/]/.test(value);
 
-  const isGitRepoUrl = (value: string) => {
+  const looksLikeRepoUrl = (value: string) => {
     try {
       const parsed = new URL(value);
+      if (parsed.protocol !== "https:") return false;
       const segments = parsed.pathname.split("/").filter(Boolean);
       return segments.length >= 2;
     } catch {
@@ -371,7 +365,7 @@ export function ProjectProperties({ project, onUpdate, onFieldUpdate, getFieldSa
     }
   };
 
-  const formatGitRepo = (value: string) => {
+  const formatRepoUrl = (value: string) => {
     try {
       const parsed = new URL(value);
       const segments = parsed.pathname.split("/").filter(Boolean);
@@ -438,8 +432,8 @@ export function ProjectProperties({ project, onUpdate, onFieldUpdate, getFieldSa
       persistCodebase({ repoUrl: null });
       return;
     }
-    if (!isGitRepoUrl(repoUrl)) {
-      setWorkspaceError("Repo workspace must use a valid git repo URL (e.g. https://github.com/org/repo or https://gitlab.com/org/repo).");
+    if (!looksLikeRepoUrl(repoUrl)) {
+      setWorkspaceError("Repo must use a valid GitHub or GitHub Enterprise repo URL.");
       return;
     }
     setWorkspaceError(null);
@@ -623,93 +617,157 @@ export function ProjectProperties({ project, onUpdate, onFieldUpdate, getFieldSa
           </div>
           <div className="space-y-2 rounded-md border border-border/70 p-3">
             <div className="space-y-1">
-              {workspaces.map((workspace) => (
-                <div key={workspace.id} className="space-y-1">
-                  {workspace.cwd ? (
-                    <div className="flex items-center justify-between gap-2 py-1">
-                      <span className="min-w-0 truncate font-mono text-xs text-muted-foreground">{workspace.cwd}</span>
-                      <Button
-                        variant="ghost"
-                        size="icon-xs"
-                        onClick={() => clearLocalWorkspace()}
-                        aria-label="Delete local folder"
-                      >
-                        <Trash2 className="h-3 w-3" />
-                      </Button>
+              <div className="text-[11px] uppercase tracking-wide text-muted-foreground">Repo</div>
+              {codebase.repoUrl ? (
+                <div className="flex items-center justify-between gap-2">
+                  {isSafeExternalUrl(codebase.repoUrl) ? (
+                    <a
+                      href={codebase.repoUrl}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="inline-flex min-w-0 items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground hover:underline"
+                    >
+                      <Github className="h-3 w-3 shrink-0" />
+                      <span className="truncate">{formatRepoUrl(codebase.repoUrl)}</span>
+                      <ExternalLink className="h-3 w-3 shrink-0" />
+                    </a>
+                  ) : (
+                    <div className="inline-flex min-w-0 items-center gap-1.5 text-xs text-muted-foreground">
+                      <Github className="h-3 w-3 shrink-0" />
+                      <span className="truncate">{codebase.repoUrl}</span>
                     </div>
-                  ) : null}
-                  {workspace.repoUrl ? (
-                    <div className="flex items-center justify-between gap-2 py-1">
-                      <a
-                        href={workspace.repoUrl}
-                        target="_blank"
-                        rel="noreferrer"
-                        className="inline-flex min-w-0 items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground hover:underline"
-                      >
-                        {workspace.repoUrl.includes("github.com")
-                          ? <Github className="h-3 w-3 shrink-0" />
-                          : <GitBranch className="h-3 w-3 shrink-0" />}
-                        <span className="truncate">{formatGitRepo(workspace.repoUrl)}</span>
-                        <ExternalLink className="h-3 w-3 shrink-0" />
-                      </a>
-                      <Button
-                        variant="ghost"
-                        size="icon-xs"
-                        onClick={() => clearRepoWorkspace()}
-                        aria-label="Delete workspace repo"
-                      >
-                        <Trash2 className="h-3 w-3" />
-                      </Button>
-                    </div>
-                  ) : null}
-                  {workspace.runtimeServices && workspace.runtimeServices.length > 0 ? (
-                    <div className="space-y-1 pl-2">
-                      {workspace.runtimeServices.map((service) => (
-                        <div
-                          key={service.id}
-                          className="flex items-center justify-between gap-2 rounded-md border border-border/60 px-2 py-1"
-                        >
-                          <div className="min-w-0 space-y-0.5">
-                            <div className="flex items-center gap-2">
-                              <span className="text-[11px] font-medium">{service.serviceName}</span>
-                              <span
-                                className={cn(
-                                  "rounded-full px-1.5 py-0.5 text-[10px] uppercase tracking-wide",
-                                  service.status === "running"
-                                    ? "bg-green-500/15 text-green-700 dark:text-green-300"
-                                    : service.status === "failed"
-                                      ? "bg-red-500/15 text-red-700 dark:text-red-300"
-                                      : "bg-muted text-muted-foreground",
-                                )}
-                              >
-                                {service.status}
-                              </span>
-                            </div>
-                            <div className="text-[11px] text-muted-foreground">
-                              {service.url ? (
-                                <a
-                                  href={service.url}
-                                  target="_blank"
-                                  rel="noreferrer"
-                                  className="hover:text-foreground hover:underline"
-                                >
-                                  {service.url}
-                                </a>
-                              ) : (
-                                service.command ?? "No URL"
-                              )}
-                            </div>
-                          </div>
-                          <div className="text-[10px] text-muted-foreground whitespace-nowrap">
-                            {service.lifecycle}
-                          </div>
-                        </div>
-                      ))}
-                    </div>
+                  )}
+                  <div className="flex items-center gap-1">
+                    <Button
+                      variant="outline"
+                      size="xs"
+                      className="h-6 px-2"
+                      onClick={() => {
+                        setWorkspaceMode("repo");
+                        setWorkspaceRepoUrl(codebase.repoUrl ?? "");
+                        setWorkspaceError(null);
+                      }}
+                    >
+                      Change repo
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="icon-xs"
+                      onClick={clearRepoWorkspace}
+                      aria-label="Clear repo"
+                    >
+                      <Trash2 className="h-3 w-3" />
+                    </Button>
+                  </div>
+                </div>
+              ) : (
+                <div className="flex items-center justify-between gap-2">
+                  <div className="text-xs text-muted-foreground">Not set.</div>
+                  <Button
+                    variant="outline"
+                    size="xs"
+                    className="h-6 px-2"
+                    onClick={() => {
+                      setWorkspaceMode("repo");
+                      setWorkspaceRepoUrl(codebase.repoUrl ?? "");
+                      setWorkspaceError(null);
+                    }}
+                  >
+                    Set repo
+                  </Button>
+                </div>
+              )}
+            </div>
+
+            <div className="space-y-1">
+              <div className="text-[11px] uppercase tracking-wide text-muted-foreground">Local folder</div>
+              <div className="flex items-center justify-between gap-2">
+                <div className="min-w-0 space-y-1">
+                  <div className="min-w-0 truncate font-mono text-xs text-muted-foreground">
+                    {codebase.effectiveLocalFolder}
+                  </div>
+                  {codebase.origin === "managed_checkout" && (
+                    <div className="text-[11px] text-muted-foreground">Paperclip-managed folder.</div>
+                  )}
+                </div>
+                <div className="flex items-center gap-1">
+                  <Button
+                    variant="outline"
+                    size="xs"
+                    className="h-6 px-2"
+                    onClick={() => {
+                      setWorkspaceMode("local");
+                      setWorkspaceCwd(codebase.localFolder ?? "");
+                      setWorkspaceError(null);
+                    }}
+                  >
+                    {codebase.localFolder ? "Change local folder" : "Set local folder"}
+                  </Button>
+                  {codebase.localFolder ? (
+                    <Button
+                      variant="ghost"
+                      size="icon-xs"
+                      onClick={clearLocalWorkspace}
+                      aria-label="Clear local folder"
+                    >
+                      <Trash2 className="h-3 w-3" />
+                    </Button>
                   ) : null}
                 </div>
-              ))}
+              </div>
             </div>
+
+            {hasAdditionalLegacyWorkspaces && (
+              <div className="text-[11px] text-muted-foreground">
+                Additional legacy workspace records exist on this project. Paperclip is using the primary workspace as the codebase view.
+              </div>
+            )}
+
+            {primaryCodebaseWorkspace?.runtimeServices && primaryCodebaseWorkspace.runtimeServices.length > 0 ? (
+              <div className="space-y-1">
+                {primaryCodebaseWorkspace.runtimeServices.map((service) => (
+                  <div
+                    key={service.id}
+                    className="flex items-center justify-between gap-2 rounded-md border border-border/60 px-2 py-1"
+                  >
+                    <div className="min-w-0 space-y-0.5">
+                      <div className="flex items-center gap-2">
+                        <span className="text-[11px] font-medium">{service.serviceName}</span>
+                        <span
+                          className={cn(
+                            "rounded-full px-1.5 py-0.5 text-[10px] uppercase tracking-wide",
+                            service.status === "running"
+                              ? "bg-green-500/15 text-green-700 dark:text-green-300"
+                              : service.status === "failed"
+                                ? "bg-red-500/15 text-red-700 dark:text-red-300"
+                                : "bg-muted text-muted-foreground",
+                          )}
+                        >
+                          {service.status}
+                        </span>
+                      </div>
+                      <div className="text-[11px] text-muted-foreground">
+                        {service.url ? (
+                          <a
+                            href={service.url}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="hover:text-foreground hover:underline"
+                          >
+                            {service.url}
+                          </a>
+                        ) : (
+                          service.command ?? "No URL"
+                        )}
+                      </div>
+                    </div>
+                    <div className="text-[10px] text-muted-foreground whitespace-nowrap">
+                      {service.lifecycle}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ) : null}
           </div>
           {workspaceMode === "local" && (
             <div className="space-y-1.5 rounded-md border border-border p-2">
@@ -753,7 +811,7 @@ export function ProjectProperties({ project, onUpdate, onFieldUpdate, getFieldSa
                 className="w-full rounded border border-border bg-transparent px-2 py-1 text-xs outline-none"
                 value={workspaceRepoUrl}
                 onChange={(e) => setWorkspaceRepoUrl(e.target.value)}
-                placeholder="https://github.com/org/repo or https://gitlab.com/org/repo"
+                placeholder="https://github.com/org/repo"
               />
               <div className="flex items-center gap-2">
                 <Button
@@ -794,78 +852,7 @@ export function ProjectProperties({ project, onUpdate, onFieldUpdate, getFieldSa
           )}
         </div>
 
-        {onDelete && (
-          <>
-            <Separator className="my-4" />
-            <div className="space-y-2 py-1">
-              <p className="text-xs text-muted-foreground">Danger Zone</p>
-              <Button
-                variant="outline"
-                size="xs"
-                className="h-7 px-2.5 border-destructive/40 text-destructive hover:bg-destructive/10 hover:text-destructive"
-                onClick={() => {
-                  setDeleteConfirmText("");
-                  setDeleteDialogOpen(true);
-                }}
-              >
-                <Trash2 className="h-3 w-3 mr-1.5" />
-                Delete project
-              </Button>
-            </div>
-          </>
-        )}
-
-        <Dialog open={deleteDialogOpen} onOpenChange={(open) => {
-          setDeleteDialogOpen(open);
-          if (!open) setDeleteConfirmText("");
-        }}>
-          <DialogContent>
-            <DialogHeader>
-              <DialogTitle>Delete project</DialogTitle>
-              <DialogDescription>
-                This will permanently delete <strong>{project.name}</strong> and all its data. This cannot be undone.
-              </DialogDescription>
-            </DialogHeader>
-            <div className="space-y-2">
-              <p className="text-sm text-muted-foreground">
-                Type <span className="font-mono font-medium text-foreground">{project.name}</span> to confirm.
-              </p>
-              <Input
-                value={deleteConfirmText}
-                onChange={(e) => setDeleteConfirmText(e.target.value)}
-                placeholder={project.name}
-                autoFocus
-              />
-            </div>
-            <DialogFooter>
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => {
-                  setDeleteDialogOpen(false);
-                  setDeleteConfirmText("");
-                }}
-              >
-                Cancel
-              </Button>
-              <Button
-                variant="destructive"
-                size="sm"
-                disabled={deleteConfirmText !== project.name || isDeleting}
-                onClick={() => {
-                  onDelete?.();
-                  setDeleteDialogOpen(false);
-                  setDeleteConfirmText("");
-                }}
-              >
-                {isDeleting ? <Loader2 className="h-3.5 w-3.5 animate-spin mr-1.5" /> : null}
-                Delete project
-              </Button>
-            </DialogFooter>
-          </DialogContent>
-        </Dialog>
-
-        {SHOW_EXPERIMENTAL_ISSUE_WORKTREE_UI && (
+        {isolatedWorkspacesEnabled ? (
           <>
             <Separator className="my-4" />
 
@@ -1115,7 +1102,7 @@ export function ProjectProperties({ project, onUpdate, onFieldUpdate, getFieldSa
               </div>
             </div>
           </>
-        )}
+        ) : null}
 
       </div>
 

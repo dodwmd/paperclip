@@ -318,73 +318,31 @@
       "breakpoints": true
     },
     {
-      "idx": 9000,
+      "idx": 45,
       "version": "7",
-      "when": 1772836441586,
-      "tag": "9000_noisy_moira_mactaggert",
+      "when": 1774530504348,
+      "tag": "0045_workable_shockwave",
       "breakpoints": true
     },
     {
-      "idx": 9001,
+      "idx": 46,
       "version": "7",
-      "when": 1772944468471,
-      "tag": "9001_agent_mcp_servers",
+      "when": 1774960197878,
+      "tag": "0046_smooth_sentinels",
       "breakpoints": true
     },
     {
-      "idx": 9002,
+      "idx": 47,
       "version": "7",
-      "when": 1741651200000,
-      "tag": "9002_kanban_pr_url",
+      "when": 1775137972687,
+      "tag": "0047_overjoyed_groot",
       "breakpoints": true
     },
     {
-      "idx": 9003,
+      "idx": 48,
       "version": "7",
-      "when": 1773256551827,
-      "tag": "9003_agent_persona_git",
-      "breakpoints": true
-    },
-    {
-      "idx": 9004,
-      "version": "7",
-      "when": 1741737600000,
-      "tag": "9004_issue_dependencies",
-      "breakpoints": true
-    },
-    {
-      "idx": 9005,
-      "version": "7",
-      "when": 1741824000000,
-      "tag": "9005_agent_persona_git_sha",
-      "breakpoints": true
-    },
-    {
-      "idx": 9006,
-      "version": "7",
-      "when": 1741910400000,
-      "tag": "9006_company_kanban_config",
-      "breakpoints": true
-    },
-    {
-      "idx": 9007,
-      "version": "7",
-      "when": 1741996800000,
-      "tag": "9007_company_kanban_git",
-      "breakpoints": true
-    },
-    {
-      "idx": 9008,
-      "version": "7",
-      "when": 1742083200000,
-      "tag": "9008_heartbeat_run_tool_calls",
-      "breakpoints": true
-    },
-    {
-      "idx": 9009,
-      "version": "7",
-      "when": 1742169600000,
-      "tag": "9009_instance_mcp_catalog",
+      "when": 1775145655557,
+      "tag": "0048_flashy_marrow",
       "breakpoints": true
     }
   ]

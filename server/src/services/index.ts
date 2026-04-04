@@ -1,4 +1,5 @@
 export { companyService } from "./companies.js";
+export { feedbackService } from "./feedback.js";
 export {
   DEFAULT_TRANSITION_RULES,
   DEFAULT_COLUMNS,
@@ -46,5 +47,5 @@ export { syncAgentPersona, parseGitHubTreeUrl, checkPersonaRemoteSha } from "./p
 export { syncKanbanConfig, checkKanbanRemoteSha } from "./kanban-git-sync.js";
 export { notifyHireApproved, type NotifyHireApprovedInput } from "./hire-hook.js";
 export { publishLiveEvent, subscribeCompanyLiveEvents } from "./live-events.js";
-export { reconcilePersistedRuntimeServicesOnStartup } from "./workspace-runtime.js";
+export { reconcilePersistedRuntimeServicesOnStartup, restartDesiredRuntimeServicesOnStartup } from "./workspace-runtime.js";
 export { createStorageServiceFromConfig, getStorageService } from "../storage/index.js";

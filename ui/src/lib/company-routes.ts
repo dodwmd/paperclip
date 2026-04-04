@@ -7,6 +7,7 @@ const BOARD_ROUTE_ROOTS = new Set([
   "workflow",
   "agents",
   "projects",
+  "execution-workspaces",
   "issues",
   "routines",
   "goals",
