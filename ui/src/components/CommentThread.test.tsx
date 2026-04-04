@@ -78,6 +78,11 @@ describe("CommentThread", () => {
       permissions: { canCreateAgents: false },
       lastHeartbeatAt: null,
       metadata: null,
+      mcpServers: null,
+      personaGitUrl: null,
+      personaLastSyncedAt: null,
+      personaLastSyncError: null,
+      personaGitSha: null,
       createdAt: new Date("2026-03-11T00:00:00.000Z"),
       updatedAt: new Date("2026-03-11T00:00:00.000Z"),
     };

@@ -599,7 +599,6 @@ export function IssueProperties({ issue, onUpdate, inline }: IssuePropertiesProp
           {projectContent}
         </PropertyPicker>
 
-<<<<<<< HEAD
         {(issue.status === "in_progress" || issue.status === "in_review") && (
           <PropertyRow label="PR URL">
             <input

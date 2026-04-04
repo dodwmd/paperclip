@@ -66,6 +66,7 @@
     "drizzle-orm": "^0.38.4",
     "express": "^5.1.0",
     "hermes-paperclip-adapter": "^0.2.0",
+    "http-proxy-middleware": "^3.0.5",
     "jsdom": "^28.1.0",
     "multer": "^2.0.2",
     "open": "^11.0.0",

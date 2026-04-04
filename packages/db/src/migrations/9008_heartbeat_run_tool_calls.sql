@@ -1,1 +1,0 @@
-ALTER TABLE "heartbeat_runs" ADD COLUMN "tool_calls_json" jsonb;

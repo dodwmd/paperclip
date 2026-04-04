@@ -218,7 +218,6 @@ function formatAction(action: string, details?: Record<string, unknown> | null):
   return ACTION_LABELS[action] ?? action.replace(/[._]/g, " ");
 }
 
-<<<<<<< HEAD
 function DependencyRow({
   dep,
   onRemove,
@@ -985,7 +984,6 @@ export function IssueDetail() {
     },
   });
 
-<<<<<<< HEAD
   const addBlocker = useMutation({
     mutationFn: (blockerId: string) => issuesApi.addBlocker(issueId!, blockerId),
     onSuccess: () => {

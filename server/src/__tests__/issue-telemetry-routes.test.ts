@@ -1,12 +1,13 @@
 import express from "express";
 import request from "supertest";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { issueRoutes } from "../routes/issues.js";
 import { errorHandler } from "../middleware/index.js";
 
 const mockIssueService = vi.hoisted(() => ({
   getById: vi.fn(),
   update: vi.fn(),
+  autoUnblockDependents: vi.fn().mockResolvedValue(undefined),
 }));
 
 const mockAgentService = vi.hoisted(() => ({
@@ -24,29 +25,34 @@ vi.mock("../telemetry.js", () => ({
   getTelemetryClient: mockGetTelemetryClient,
 }));
 
-vi.mock("../services/index.js", () => ({
-  accessService: () => ({
-    canUser: vi.fn(),
-    hasPermission: vi.fn(),
-  }),
-  agentService: () => mockAgentService,
-  documentService: () => ({}),
-  executionWorkspaceService: () => ({}),
-  feedbackService: () => ({}),
-  goalService: () => ({}),
-  heartbeatService: () => ({
-    reportRunActivity: vi.fn(async () => undefined),
-  }),
-  instanceSettingsService: () => ({}),
-  issueApprovalService: () => ({}),
-  issueService: () => mockIssueService,
-  logActivity: vi.fn(async () => undefined),
-  projectService: () => ({}),
-  routineService: () => ({
-    syncRunStatusForIssue: vi.fn(async () => undefined),
-  }),
-  workProductService: () => ({}),
-}));
+vi.mock("../services/index.js", async (importOriginal) => {
+  const actual = await importOriginal() as Record<string, unknown>;
+  return {
+    ...actual,
+    accessService: () => ({
+      canUser: vi.fn(),
+      hasPermission: vi.fn(),
+    }),
+    agentService: () => mockAgentService,
+    companyService: () => ({ getById: vi.fn().mockResolvedValue(null) }),
+    documentService: () => ({}),
+    executionWorkspaceService: () => ({}),
+    feedbackService: () => ({}),
+    goalService: () => ({}),
+    heartbeatService: () => ({
+      reportRunActivity: vi.fn(async () => undefined),
+    }),
+    instanceSettingsService: () => ({}),
+    issueApprovalService: () => ({}),
+    issueService: () => mockIssueService,
+    logActivity: vi.fn(async () => undefined),
+    projectService: () => ({}),
+    routineService: () => ({
+      syncRunStatusForIssue: vi.fn(async () => undefined),
+    }),
+    workProductService: () => ({}),
+  };
+});
 
 function makeIssue(status: "todo" | "done") {
   return {
@@ -74,7 +80,13 @@ function createApp(actor: Record<string, unknown>) {
 }
 
 describe("issue telemetry routes", () => {
+  const origEnv = process.env.KANBAN_ENFORCEMENT_ENABLED;
+  afterAll(() => {
+    if (origEnv === undefined) delete process.env.KANBAN_ENFORCEMENT_ENABLED;
+    else process.env.KANBAN_ENFORCEMENT_ENABLED = origEnv;
+  });
   beforeEach(() => {
+    process.env.KANBAN_ENFORCEMENT_ENABLED = "false";
     vi.clearAllMocks();
     mockGetTelemetryClient.mockReturnValue({ track: vi.fn() });
     mockIssueService.getById.mockResolvedValue(makeIssue("todo"));

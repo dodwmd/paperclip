@@ -207,6 +207,7 @@ function createIssue(): Issue {
     hiddenAt: null,
     labels: [],
     labelIds: [],
+    prUrl: null,
     planDocument: createIssueDocument(),
     documentSummaries: [createIssueDocument()],
     legacyPlanDocument: null,
